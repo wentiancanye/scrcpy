@@ -1,0 +1,14 @@
+按Pause播放/暂停
+1、app/src/event_converter.c 的 convert_keycode 添加 MAP(SDLK_PAUSE,		   AKEYCODE_MEDIA_PLAY_PAUSE);
+2、app/src/main.c 的 main 函数最下面添加 LOGI("press PAUSE key to play or pause. By Canye.");
+
+按Alt+J解锁屏幕
+1、server/src/main/java/com/genymobile/scrcpy/Device.java 添加 unlockScreen 函数
+2、server/src/main/java/com/genymobile/scrcpy/Controller.java 添加 Case 判断 TYPE_UNLOCK_SCREEN 过程
+3、server/src/main/java/com/genymobile/scrcpy/ControlMessageReader.java 添加 Case 判断 TYPE_UNLOCK_SCREEN 过程
+3、server/src/main/java/com/genymobile/scrcpy/ControlMessage.java 添加 TYPE_UNLOCK_SCREEN 成员
+4、app/src/control_msg.h 的 control_msg_type 添加 CONTROL_MSG_TYPE_ULOCK_SCREEN 成员
+5、app/src/input_manager.c 的 rotate_device 函数上面添加 unlock_screen 函数
+6、app/src/input_manager.c 添加 case SDLK_j
+7、app/src/control_msg.c 添加 case CONTROL_MSG_TYPE_ULOCK_SCREEN
+8、app/src/main.c 的 main 函数最下面添加 LOGI("press MOD+J key to unlock screen. By Canye.");
