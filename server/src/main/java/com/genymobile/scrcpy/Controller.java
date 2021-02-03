@@ -132,6 +132,9 @@ public class Controller {
             case ControlMessage.TYPE_ROTATE_DEVICE:
                 Device.rotateDevice();
                 break;
+            case ControlMessage.TYPE_UNLOCK_SCREEN:
+                Device.unlockScreen();
+                break;
             default:
                 // do nothing
         }

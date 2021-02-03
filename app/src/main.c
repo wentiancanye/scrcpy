@@ -86,6 +86,7 @@ main(int argc, char *argv[]) {
 
     LOGI("scrcpy " SCRCPY_VERSION " <https://github.com/Genymobile/scrcpy>");
     LOGI("press PAUSE key to play or pause. By Canye.");
+    LOGI("press MOD+J key to unlock screen. By Canye.");
 #ifdef SCRCPY_LAVF_REQUIRES_REGISTER_ALL
     av_register_all();
 #endif

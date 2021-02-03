@@ -18,6 +18,7 @@ import android.view.InputEvent;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 
+import java.io.IOException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class Device {
@@ -272,5 +273,13 @@ public final class Device {
 
     public static ContentProvider createSettingsProvider() {
         return SERVICE_MANAGER.getActivityManager().createSettingsProvider();
+    }
+    public static void unlockScreen() {
+        try {
+            Runtime.getRuntime().exec("/system/bin/sh /data/local/tmp/unlock.sh");
+        } catch (IOException e) {
+            Ln.e(e.toString());
+            e.printStackTrace();
+        }
     }
 }

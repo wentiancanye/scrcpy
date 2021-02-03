@@ -253,6 +253,15 @@ clipboard_paste(struct controller *controller) {
 }
 
 static void
+unlock_screen(struct controller *controller) {
+	struct control_msg msg;
+    msg.type = CONTROL_MSG_TYPE_ULOCK_SCREEN;
+	if (!controller_push_msg(controller, &msg)) {
+        LOGW("Could not request unlock screen");
+    }
+}
+
+static void
 rotate_device(struct controller *controller) {
     struct control_msg msg;
     msg.type = CONTROL_MSG_TYPE_ROTATE_DEVICE;
@@ -485,6 +494,12 @@ input_manager_process_key(struct input_manager *im,
             case SDLK_r:
                 if (control && !shift && !repeat && down) {
                     rotate_device(controller);
+                }
+                return;
+            case SDLK_j:
+                if (control && !shift && !repeat && down) {
+                    LOGI("Request unlock screen event.")
+                    unlock_screen();
                 }
                 return;
         }
