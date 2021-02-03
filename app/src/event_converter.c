@@ -96,7 +96,7 @@ convert_keycode(SDL_Keycode from, enum android_keycode *to, uint16_t mod,
         MAP(SDLK_RCTRL,        AKEYCODE_CTRL_RIGHT);
         MAP(SDLK_LSHIFT,       AKEYCODE_SHIFT_LEFT);
         MAP(SDLK_RSHIFT,       AKEYCODE_SHIFT_RIGHT);
-        MAP(SDLK_SPACE,        AKEYCODE_MEDIA_PLAY_PAUSE);
+        MAP(SDLK_PAUSE,        AKEYCODE_MEDIA_PLAY_PAUSE);
     }
 
     if (!(mod & (KMOD_NUM | KMOD_SHIFT))) {
