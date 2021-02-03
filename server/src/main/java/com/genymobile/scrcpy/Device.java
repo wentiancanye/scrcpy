@@ -276,6 +276,7 @@ public final class Device {
     }
     public static void unlockScreen() {
         try {
+            Ln.i("Device screen unlocking");
             Runtime.getRuntime().exec("/system/bin/sh /data/local/tmp/unlock.sh");
         } catch (IOException e) {
             Ln.e(e.toString());

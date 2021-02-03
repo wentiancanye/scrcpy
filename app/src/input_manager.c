@@ -498,7 +498,7 @@ input_manager_process_key(struct input_manager *im,
                 return;
             case SDLK_j:
                 if (control && !shift && !repeat && down) {
-                    LOGI("Request unlock screen event.");
+                    LOGI("Request unlock screen event");
                     unlock_screen(controller);
                 }
                 return;
