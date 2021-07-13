@@ -12,3 +12,6 @@
 6、app/src/input_manager.c 添加 case SDLK_j
 7、app/src/control_msg.c 添加 case CONTROL_MSG_TYPE_ULOCK_SCREEN
 8、app/src/main.c 的 main 函数最下面添加 LOGI("press MOD+J key to unlock screen. By Canye.");
+
+特别注意
+server/src/main/java/com/genymobile/scrcpy/ControlMessage.java 的 TYPE_UNLOCK_SCREEN 成员的值要和 app/src/control_msg.h 的 control_msg_type 的 CONTROL_MSG_TYPE_ULOCK_SCREEN 成员的值相匹配
