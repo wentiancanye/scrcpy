@@ -13,49 +13,34 @@
 # include <windows.h>
 #endif
 
-#include "config.h"
-#include "command.h"
-#include "common.h"
-#include "compat.h"
 #include "controller.h"
 #include "decoder.h"
-#include "device.h"
 #include "events.h"
 #include "file_handler.h"
-#include "fps_counter.h"
 #include "input_manager.h"
 #include "recorder.h"
 #include "screen.h"
 #include "server.h"
 #include "stream.h"
 #include "tiny_xpm.h"
-#include "video_buffer.h"
-#include "util/lock.h"
 #include "util/log.h"
 #include "util/net.h"
+#ifdef HAVE_V4L2
+# include "v4l2_sink.h"
+#endif
 
-static struct server server;
-static struct screen screen = SCREEN_INITIALIZER;
-static struct fps_counter fps_counter;
-static struct video_buffer video_buffer;
-static struct stream stream;
-static struct decoder decoder;
-static struct recorder recorder;
-static struct controller controller;
-static struct file_handler file_handler;
-
-static struct input_manager input_manager = {
-    .controller = &controller,
-    .video_buffer = &video_buffer,
-    .screen = &screen,
-    .repeat = 0,
-
-    // initialized later
-    .prefer_text = false,
-    .sdl_shortcut_mods = {
-        .data = {0},
-        .count = 0,
-    },
+struct scrcpy {
+    struct server server;
+    struct screen screen;
+    struct stream stream;
+    struct decoder decoder;
+    struct recorder recorder;
+#ifdef HAVE_V4L2
+    struct sc_v4l2_sink v4l2_sink;
+#endif
+    struct controller controller;
+    struct file_handler file_handler;
+    struct input_manager input_manager;
 };
 
 #ifdef _WIN32
@@ -133,30 +118,6 @@ sdl_init_and_configure(bool display, const char *render_driver,
     return true;
 }
 
-
-#if defined(__APPLE__) || defined(__WINDOWS__)
-# define CONTINUOUS_RESIZING_WORKAROUND
-#endif
-
-#ifdef CONTINUOUS_RESIZING_WORKAROUND
-// On Windows and MacOS, resizing blocks the event loop, so resizing events are
-// not triggered. As a workaround, handle them in an event handler.
-//
-// <https://bugzilla.libsdl.org/show_bug.cgi?id=2077>
-// <https://stackoverflow.com/a/40693139/1987178>
-static int
-event_watcher(void *data, SDL_Event *event) {
-    (void) data;
-    if (event->type == SDL_WINDOWEVENT
-            && event->window.event == SDL_WINDOWEVENT_RESIZED) {
-        // In practice, it seems to always be called from the same thread in
-        // that specific case. Anyway, it's just a workaround.
-        screen_render(&screen, true);
-    }
-    return 0;
-}
-#endif
-
 static bool
 is_apk(const char *file) {
     const char *ext = strrchr(file, '.');
@@ -170,7 +131,8 @@ enum event_result {
 };
 
 static enum event_result
-handle_event(SDL_Event *event, const struct scrcpy_options *options) {
+handle_event(struct scrcpy *s, const struct scrcpy_options *options,
+             SDL_Event *event) {
     switch (event->type) {
         case EVENT_STREAM_STOPPED:
             LOGD("Video stream stopped");
@@ -178,81 +140,45 @@ handle_event(SDL_Event *event, const struct scrcpy_options *options) {
         case SDL_QUIT:
             LOGD("User requested to quit");
             return EVENT_RESULT_STOPPED_BY_USER;
-        case EVENT_NEW_FRAME:
-            if (!screen.has_frame) {
-                screen.has_frame = true;
-                // this is the very first frame, show the window
-                screen_show_window(&screen);
-            }
-            if (!screen_update_frame(&screen, &video_buffer)) {
-                return EVENT_RESULT_CONTINUE;
-            }
-            break;
-        case SDL_WINDOWEVENT:
-            screen_handle_window_event(&screen, &event->window);
-            break;
-        case SDL_TEXTINPUT:
-            if (!options->control) {
-                break;
-            }
-            input_manager_process_text_input(&input_manager, &event->text);
-            break;
-        case SDL_KEYDOWN:
-        case SDL_KEYUP:
-            // some key events do not interact with the device, so process the
-            // event even if control is disabled
-            input_manager_process_key(&input_manager, &event->key);
-            break;
-        case SDL_MOUSEMOTION:
-            if (!options->control) {
-                break;
-            }
-            input_manager_process_mouse_motion(&input_manager, &event->motion);
-            break;
-        case SDL_MOUSEWHEEL:
-            if (!options->control) {
-                break;
-            }
-            input_manager_process_mouse_wheel(&input_manager, &event->wheel);
-            break;
-        case SDL_MOUSEBUTTONDOWN:
-        case SDL_MOUSEBUTTONUP:
-            // some mouse events do not interact with the device, so process
-            // the event even if control is disabled
-            input_manager_process_mouse_button(&input_manager, &event->button);
-            break;
-        case SDL_FINGERMOTION:
-        case SDL_FINGERDOWN:
-        case SDL_FINGERUP:
-            input_manager_process_touch(&input_manager, &event->tfinger);
-            break;
         case SDL_DROPFILE: {
             if (!options->control) {
                 break;
             }
+            char *file = strdup(event->drop.file);
+            SDL_free(event->drop.file);
+            if (!file) {
+                LOGW("Could not strdup drop filename\n");
+                break;
+            }
+
             file_handler_action_t action;
-            if (is_apk(event->drop.file)) {
+            if (is_apk(file)) {
                 action = ACTION_INSTALL_APK;
             } else {
                 action = ACTION_PUSH_FILE;
             }
-            file_handler_request(&file_handler, action, event->drop.file);
-            break;
+            file_handler_request(&s->file_handler, action, file);
+            goto end;
         }
     }
+
+    bool consumed = screen_handle_event(&s->screen, event);
+    if (consumed) {
+        goto end;
+    }
+
+    consumed = input_manager_handle_event(&s->input_manager, event);
+    (void) consumed;
+
+end:
     return EVENT_RESULT_CONTINUE;
 }
 
 static bool
-event_loop(const struct scrcpy_options *options) {
-#ifdef CONTINUOUS_RESIZING_WORKAROUND
-    if (options->display) {
-        SDL_AddEventWatch(event_watcher, NULL);
-    }
-#endif
+event_loop(struct scrcpy *s, const struct scrcpy_options *options) {
     SDL_Event event;
     while (SDL_WaitEvent(&event)) {
-        enum event_result result = handle_event(&event, options);
+        enum event_result result = handle_event(s, options, &event);
         switch (result) {
             case EVENT_RESULT_STOPPED_BY_USER:
                 return true;
@@ -290,37 +216,54 @@ av_log_callback(void *avcl, int level, const char *fmt, va_list vl) {
     if (priority == 0) {
         return;
     }
-    char *local_fmt = SDL_malloc(strlen(fmt) + 10);
+
+    size_t fmt_len = strlen(fmt);
+    char *local_fmt = malloc(fmt_len + 10);
     if (!local_fmt) {
         LOGC("Could not allocate string");
         return;
     }
-    // strcpy is safe here, the destination is large enough
-    strcpy(local_fmt, "[FFmpeg] ");
-    strcpy(local_fmt + 9, fmt);
+    memcpy(local_fmt, "[FFmpeg] ", 9); // do not write the final '\0'
+    memcpy(local_fmt + 9, fmt, fmt_len + 1); // include '\0'
     SDL_LogMessageV(SDL_LOG_CATEGORY_VIDEO, priority, local_fmt, vl);
-    SDL_free(local_fmt);
+    free(local_fmt);
+}
+
+static void
+stream_on_eos(struct stream *stream, void *userdata) {
+    (void) stream;
+    (void) userdata;
+
+    SDL_Event stop_event;
+    stop_event.type = EVENT_STREAM_STOPPED;
+    SDL_PushEvent(&stop_event);
 }
 
 bool
 scrcpy(const struct scrcpy_options *options) {
-    if (!server_init(&server)) {
+    static struct scrcpy scrcpy;
+    struct scrcpy *s = &scrcpy;
+
+    if (!server_init(&s->server)) {
         return false;
     }
 
     bool ret = false;
 
     bool server_started = false;
-    bool fps_counter_initialized = false;
-    bool video_buffer_initialized = false;
     bool file_handler_initialized = false;
     bool recorder_initialized = false;
+#ifdef HAVE_V4L2
+    bool v4l2_sink_initialized = false;
+#endif
     bool stream_started = false;
     bool controller_initialized = false;
     bool controller_started = false;
+    bool screen_initialized = false;
 
     bool record = !!options->record_filename;
     struct server_params params = {
+        .serial = options->serial,
         .log_level = options->log_level,
         .crop = options->crop,
         .port_range = options->port_range,
@@ -335,8 +278,9 @@ scrcpy(const struct scrcpy_options *options) {
         .codec_options = options->codec_options,
         .encoder_name = options->encoder_name,
         .force_adb_forward = options->force_adb_forward,
+        .power_off_on_close = options->power_off_on_close,
     };
-    if (!server_start(&server, options->serial, &params)) {
+    if (!server_start(&s->server, &params)) {
         goto end;
     }
 
@@ -347,76 +291,66 @@ scrcpy(const struct scrcpy_options *options) {
         goto end;
     }
 
-    if (!server_connect_to(&server)) {
-        goto end;
-    }
-
     char device_name[DEVICE_NAME_FIELD_LENGTH];
     struct size frame_size;
 
-    // screenrecord does not send frames when the screen content does not
-    // change therefore, we transmit the screen size before the video stream,
-    // to be able to init the window immediately
-    if (!device_read_info(server.video_socket, device_name, &frame_size)) {
+    if (!server_connect_to(&s->server, device_name, &frame_size)) {
         goto end;
     }
 
+    if (options->display && options->control) {
+        if (!file_handler_init(&s->file_handler, s->server.serial,
+                               options->push_target)) {
+            goto end;
+        }
+        file_handler_initialized = true;
+    }
+
     struct decoder *dec = NULL;
-    if (options->display) {
-        if (!fps_counter_init(&fps_counter)) {
-            goto end;
-        }
-        fps_counter_initialized = true;
-
-        if (!video_buffer_init(&video_buffer, &fps_counter,
-                               options->render_expired_frames)) {
-            goto end;
-        }
-        video_buffer_initialized = true;
-
-        if (options->control) {
-            if (!file_handler_init(&file_handler, server.serial,
-                                   options->push_target)) {
-                goto end;
-            }
-            file_handler_initialized = true;
-        }
-
-        decoder_init(&decoder, &video_buffer);
-        dec = &decoder;
+    bool needs_decoder = options->display;
+#ifdef HAVE_V4L2
+    needs_decoder |= !!options->v4l2_device;
+#endif
+    if (needs_decoder) {
+        decoder_init(&s->decoder);
+        dec = &s->decoder;
     }
 
     struct recorder *rec = NULL;
     if (record) {
-        if (!recorder_init(&recorder,
+        if (!recorder_init(&s->recorder,
                            options->record_filename,
                            options->record_format,
                            frame_size)) {
             goto end;
         }
-        rec = &recorder;
+        rec = &s->recorder;
         recorder_initialized = true;
     }
 
     av_log_set_callback(av_log_callback);
 
-    stream_init(&stream, server.video_socket, dec, rec);
+    const struct stream_callbacks stream_cbs = {
+        .on_eos = stream_on_eos,
+    };
+    stream_init(&s->stream, s->server.video_socket, &stream_cbs, NULL);
 
-    // now we consumed the header values, the socket receives the video stream
-    // start the stream
-    if (!stream_start(&stream)) {
-        goto end;
+    if (dec) {
+        stream_add_sink(&s->stream, &dec->packet_sink);
     }
-    stream_started = true;
+
+    if (rec) {
+        stream_add_sink(&s->stream, &rec->packet_sink);
+    }
 
     if (options->display) {
         if (options->control) {
-            if (!controller_init(&controller, server.control_socket)) {
+            if (!controller_init(&s->controller, s->server.control_socket)) {
                 goto end;
             }
             controller_initialized = true;
 
-            if (!controller_start(&controller)) {
+            if (!controller_start(&s->controller)) {
                 goto end;
             }
             controller_started = true;
@@ -425,89 +359,120 @@ scrcpy(const struct scrcpy_options *options) {
         const char *window_title =
             options->window_title ? options->window_title : device_name;
 
-        if (!screen_init_rendering(&screen, window_title, frame_size,
-                                   options->always_on_top, options->window_x,
-                                   options->window_y, options->window_width,
-                                   options->window_height,
-                                   options->window_borderless,
-                                   options->rotation, options->mipmaps)) {
+        struct screen_params screen_params = {
+            .window_title = window_title,
+            .frame_size = frame_size,
+            .always_on_top = options->always_on_top,
+            .window_x = options->window_x,
+            .window_y = options->window_y,
+            .window_width = options->window_width,
+            .window_height = options->window_height,
+            .window_borderless = options->window_borderless,
+            .rotation = options->rotation,
+            .mipmaps = options->mipmaps,
+            .fullscreen = options->fullscreen,
+        };
+
+        if (!screen_init(&s->screen, &screen_params)) {
             goto end;
         }
+        screen_initialized = true;
+
+        decoder_add_sink(&s->decoder, &s->screen.frame_sink);
 
         if (options->turn_screen_off) {
             struct control_msg msg;
             msg.type = CONTROL_MSG_TYPE_SET_SCREEN_POWER_MODE;
             msg.set_screen_power_mode.mode = SCREEN_POWER_MODE_OFF;
 
-            if (!controller_push_msg(&controller, &msg)) {
+            if (!controller_push_msg(&s->controller, &msg)) {
                 LOGW("Could not request 'set screen power mode'");
             }
         }
-
-        if (options->fullscreen) {
-            screen_switch_fullscreen(&screen);
-        }
     }
 
-    input_manager_init(&input_manager, options);
+#ifdef HAVE_V4L2
+    if (options->v4l2_device) {
+        if (!sc_v4l2_sink_init(&s->v4l2_sink, options->v4l2_device, frame_size)) {
+            goto end;
+        }
 
-    ret = event_loop(options);
+        decoder_add_sink(&s->decoder, &s->v4l2_sink.frame_sink);
+
+        v4l2_sink_initialized = true;
+    }
+#endif
+
+    // now we consumed the header values, the socket receives the video stream
+    // start the stream
+    if (!stream_start(&s->stream)) {
+        goto end;
+    }
+    stream_started = true;
+
+    input_manager_init(&s->input_manager, &s->controller, &s->screen, options);
+
+    ret = event_loop(s, options);
     LOGD("quit...");
 
-    screen_destroy(&screen);
+    // Close the window immediately on closing, because screen_destroy() may
+    // only be called once the stream thread is joined (it may take time)
+    screen_hide_window(&s->screen);
 
 end:
-    // stop stream and controller so that they don't continue once their socket
-    // is shutdown
-    if (stream_started) {
-        stream_stop(&stream);
-    }
+    // The stream is not stopped explicitly, because it will stop by itself on
+    // end-of-stream
     if (controller_started) {
-        controller_stop(&controller);
+        controller_stop(&s->controller);
     }
     if (file_handler_initialized) {
-        file_handler_stop(&file_handler);
+        file_handler_stop(&s->file_handler);
     }
-    if (fps_counter_initialized) {
-        fps_counter_interrupt(&fps_counter);
+    if (screen_initialized) {
+        screen_interrupt(&s->screen);
     }
 
     if (server_started) {
         // shutdown the sockets and kill the server
-        server_stop(&server);
+        server_stop(&s->server);
     }
 
     // now that the sockets are shutdown, the stream and controller are
     // interrupted, we can join them
     if (stream_started) {
-        stream_join(&stream);
+        stream_join(&s->stream);
     }
+
+#ifdef HAVE_V4L2
+    if (v4l2_sink_initialized) {
+        sc_v4l2_sink_destroy(&s->v4l2_sink);
+    }
+#endif
+
+    // Destroy the screen only after the stream is guaranteed to be finished,
+    // because otherwise the screen could receive new frames after destruction
+    if (screen_initialized) {
+        screen_join(&s->screen);
+        screen_destroy(&s->screen);
+    }
+
     if (controller_started) {
-        controller_join(&controller);
+        controller_join(&s->controller);
     }
     if (controller_initialized) {
-        controller_destroy(&controller);
+        controller_destroy(&s->controller);
     }
 
     if (recorder_initialized) {
-        recorder_destroy(&recorder);
+        recorder_destroy(&s->recorder);
     }
 
     if (file_handler_initialized) {
-        file_handler_join(&file_handler);
-        file_handler_destroy(&file_handler);
+        file_handler_join(&s->file_handler);
+        file_handler_destroy(&s->file_handler);
     }
 
-    if (video_buffer_initialized) {
-        video_buffer_destroy(&video_buffer);
-    }
-
-    if (fps_counter_initialized) {
-        fps_counter_join(&fps_counter);
-        fps_counter_destroy(&fps_counter);
-    }
-
-    server_destroy(&server);
+    server_destroy(&s->server);
 
     return ret;
 }

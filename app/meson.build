@@ -1,11 +1,11 @@
 src = [
     'src/main.c',
+    'src/adb.c',
     'src/cli.c',
-    'src/command.c',
+    'src/compat.c',
     'src/control_msg.c',
     'src/controller.c',
     'src/decoder.c',
-    'src/device.c',
     'src/device_msg.c',
     'src/event_converter.c',
     'src/file_handler.c',
@@ -20,9 +20,29 @@ src = [
     'src/stream.c',
     'src/tiny_xpm.c',
     'src/video_buffer.c',
+    'src/util/log.c',
     'src/util/net.c',
-    'src/util/str_util.c'
+    'src/util/process.c',
+    'src/util/str_util.c',
+    'src/util/thread.c',
 ]
+
+if host_machine.system() == 'windows'
+    src += [ 'src/sys/win/process.c' ]
+else
+    src += [ 'src/sys/unix/process.c' ]
+endif
+
+v4l2_support = host_machine.system() == 'linux'
+if v4l2_support
+    src += [ 'src/v4l2_sink.c' ]
+endif
+
+check_functions = [
+    'strdup'
+]
+
+cc = meson.get_compiler('c')
 
 if not get_option('crossbuild_windows')
 
@@ -34,11 +54,13 @@ if not get_option('crossbuild_windows')
         dependency('sdl2'),
     ]
 
+    if v4l2_support
+        dependencies += dependency('libavdevice')
+    endif
+
 else
 
     # cross-compile mingw32 build (from Linux to Windows)
-    cc = meson.get_compiler('c')
-
     prebuilt_sdl2 = meson.get_cross_property('prebuilt_sdl2')
     sdl2_bin_dir = meson.current_source_dir() + '/../prebuilt-deps/' + prebuilt_sdl2 + '/bin'
     sdl2_lib_dir = meson.current_source_dir() + '/../prebuilt-deps/' + prebuilt_sdl2 + '/lib'
@@ -73,19 +95,18 @@ else
 
 endif
 
-cc = meson.get_compiler('c')
-
 if host_machine.system() == 'windows'
-    src += [ 'src/sys/win/command.c' ]
     dependencies += cc.find_library('ws2_32')
-else
-    src += [ 'src/sys/unix/command.c' ]
 endif
 
 conf = configuration_data()
 
-# expose the build type
-conf.set('NDEBUG', get_option('buildtype') != 'debug')
+foreach f : check_functions
+  if cc.has_function(f)
+    define = 'HAVE_' + f.underscorify().to_upper()
+    conf.set(define, true)
+  endif
+endforeach
 
 # the version, updated on release
 conf.set_quoted('SCRCPY_VERSION', meson.project_version())
@@ -102,28 +123,18 @@ conf.set('PORTABLE', get_option('portable'))
 conf.set('DEFAULT_LOCAL_PORT_RANGE_FIRST', '27183')
 conf.set('DEFAULT_LOCAL_PORT_RANGE_LAST', '27199')
 
-# the default max video size for both dimensions, in pixels
-# overridden by option --max-size
-conf.set('DEFAULT_MAX_SIZE', '0')  # 0: unlimited
-
-# the default video orientation
-# natural device orientation is 0 and each increment adds 90 degrees
-# counterclockwise
-# overridden by option --lock-video-orientation
-conf.set('DEFAULT_LOCK_VIDEO_ORIENTATION', '-1')  # -1: unlocked
-
 # the default video bitrate, in bits/second
 # overridden by option --bit-rate
 conf.set('DEFAULT_BIT_RATE', '8000000')  # 8Mbps
-
-# enable High DPI support
-conf.set('HIDPI_SUPPORT', get_option('hidpi_support'))
 
 # run a server debugger and wait for a client to be attached
 conf.set('SERVER_DEBUGGER', get_option('server_debugger'))
 
 # select the debugger method ('old' for Android < 9, 'new' for Android >= 9)
 conf.set('SERVER_DEBUGGER_METHOD_NEW', get_option('server_debugger_method') == 'new')
+
+# enable V4L2 support (linux only)
+conf.set('HAVE_V4L2', v4l2_support)
 
 configure_file(configuration: conf, output: 'config.h')
 

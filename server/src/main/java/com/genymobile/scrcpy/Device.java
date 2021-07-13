@@ -26,6 +26,9 @@ public final class Device {
     public static final int POWER_MODE_OFF = SurfaceControl.POWER_MODE_OFF;
     public static final int POWER_MODE_NORMAL = SurfaceControl.POWER_MODE_NORMAL;
 
+    public static final int LOCK_VIDEO_ORIENTATION_UNLOCKED = -1;
+    public static final int LOCK_VIDEO_ORIENTATION_INITIAL = -2;
+
     private static final ServiceManager SERVICE_MANAGER = new ServiceManager();
 
     public interface RotationListener {
@@ -154,12 +157,16 @@ public final class Device {
         return Build.MODEL;
     }
 
+    public static boolean supportsInputEvents(int displayId) {
+        return displayId == 0 || Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
+    }
+
     public boolean supportsInputEvents() {
         return supportsInputEvents;
     }
 
-    public boolean injectEvent(InputEvent inputEvent, int mode) {
-        if (!supportsInputEvents()) {
+    public static boolean injectEvent(InputEvent inputEvent, int displayId) {
+        if (!supportsInputEvents(displayId)) {
             throw new AssertionError("Could not inject input event if !supportsInputEvents()");
         }
 
@@ -167,22 +174,30 @@ public final class Device {
             return false;
         }
 
-        return SERVICE_MANAGER.getInputManager().injectInputEvent(inputEvent, mode);
+        return SERVICE_MANAGER.getInputManager().injectInputEvent(inputEvent, InputManager.INJECT_INPUT_EVENT_MODE_ASYNC);
     }
 
     public boolean injectEvent(InputEvent event) {
-        return injectEvent(event, InputManager.INJECT_INPUT_EVENT_MODE_ASYNC);
+        return injectEvent(event, displayId);
     }
 
-    public boolean injectKeyEvent(int action, int keyCode, int repeat, int metaState) {
+    public static boolean injectKeyEvent(int action, int keyCode, int repeat, int metaState, int displayId) {
         long now = SystemClock.uptimeMillis();
         KeyEvent event = new KeyEvent(now, now, action, keyCode, repeat, metaState, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0,
                 InputDevice.SOURCE_KEYBOARD);
-        return injectEvent(event);
+        return injectEvent(event, displayId);
     }
 
-    public boolean injectKeycode(int keyCode) {
-        return injectKeyEvent(KeyEvent.ACTION_DOWN, keyCode, 0, 0) && injectKeyEvent(KeyEvent.ACTION_UP, keyCode, 0, 0);
+    public boolean injectKeyEvent(int action, int keyCode, int repeat, int metaState) {
+        return injectKeyEvent(action, keyCode, repeat, metaState, displayId);
+    }
+
+    public static boolean pressReleaseKeycode(int keyCode, int displayId) {
+        return injectKeyEvent(KeyEvent.ACTION_DOWN, keyCode, 0, 0, displayId) && injectKeyEvent(KeyEvent.ACTION_UP, keyCode, 0, 0, displayId);
+    }
+
+    public boolean pressReleaseKeycode(int keyCode) {
+        return pressReleaseKeycode(keyCode, displayId);
     }
 
     public static boolean isScreenOn() {
@@ -199,6 +214,10 @@ public final class Device {
 
     public static void expandNotificationPanel() {
         SERVICE_MANAGER.getStatusBarManager().expandNotificationsPanel();
+    }
+
+    public static void expandSettingsPanel() {
+        SERVICE_MANAGER.getStatusBarManager().expandSettingsPanel();
     }
 
     public static void collapsePanels() {
@@ -248,6 +267,13 @@ public final class Device {
             return false;
         }
         return SurfaceControl.setDisplayPowerMode(d, mode);
+    }
+
+    public static boolean powerOffScreen(int displayId) {
+        if (!isScreenOn()) {
+            return true;
+        }
+        return pressReleaseKeycode(KeyEvent.KEYCODE_POWER, displayId);
     }
 
     /**

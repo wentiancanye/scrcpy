@@ -1,12 +1,10 @@
-#include "command.h"
+#include "adb.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "config.h"
-#include "common.h"
 #include "util/log.h"
 #include "util/str_util.h"
 
@@ -70,7 +68,7 @@ show_adb_installation_msg() {
         {"pacman", "pacman -S android-tools"},
     };
     for (size_t i = 0; i < ARRAY_LEN(pkg_managers); ++i) {
-        if (cmd_search(pkg_managers[i].binary)) {
+        if (search_executable(pkg_managers[i].binary)) {
             LOGI("You may install 'adb' by \"%s\"", pkg_managers[i].command);
             return;
         }
@@ -83,14 +81,20 @@ show_adb_installation_msg() {
 
 static void
 show_adb_err_msg(enum process_result err, const char *const argv[]) {
-    char buf[512];
+#define MAX_COMMAND_STRING_LEN 1024
+    char *buf = malloc(MAX_COMMAND_STRING_LEN);
+    if (!buf) {
+        LOGE("Failed to execute (could not allocate error message)");
+        return;
+    }
+
     switch (err) {
         case PROCESS_ERROR_GENERIC:
-            argv_to_string(argv, buf, sizeof(buf));
+            argv_to_string(argv, buf, MAX_COMMAND_STRING_LEN);
             LOGE("Failed to execute: %s", buf);
             break;
         case PROCESS_ERROR_MISSING_BINARY:
-            argv_to_string(argv, buf, sizeof(buf));
+            argv_to_string(argv, buf, MAX_COMMAND_STRING_LEN);
             LOGE("Command not found: %s", buf);
             LOGE("(make 'adb' accessible from your PATH or define its full"
                  "path in the ADB environment variable)");
@@ -100,29 +104,38 @@ show_adb_err_msg(enum process_result err, const char *const argv[]) {
             // do nothing
             break;
     }
+
+    free(buf);
 }
 
 process_t
 adb_execute(const char *serial, const char *const adb_cmd[], size_t len) {
-    const char *cmd[len + 4];
     int i;
     process_t process;
-    cmd[0] = get_adb_command();
+
+    const char **argv = malloc((len + 4) * sizeof(*argv));
+    if (!argv) {
+        return PROCESS_NONE;
+    }
+
+    argv[0] = get_adb_command();
     if (serial) {
-        cmd[1] = "-s";
-        cmd[2] = serial;
+        argv[1] = "-s";
+        argv[2] = serial;
         i = 3;
     } else {
         i = 1;
     }
 
-    memcpy(&cmd[i], adb_cmd, len * sizeof(const char *));
-    cmd[len + i] = NULL;
-    enum process_result r = cmd_execute(cmd, &process);
+    memcpy(&argv[i], adb_cmd, len * sizeof(const char *));
+    argv[len + i] = NULL;
+    enum process_result r = process_execute(argv, &process);
     if (r != PROCESS_SUCCESS) {
-        show_adb_err_msg(r, cmd);
-        return PROCESS_NONE;
+        show_adb_err_msg(r, argv);
+        process = PROCESS_NONE;
     }
+
+    free(argv);
     return process;
 }
 
@@ -175,7 +188,7 @@ adb_push(const char *serial, const char *local, const char *remote) {
     }
     remote = strquote(remote);
     if (!remote) {
-        SDL_free((void *) local);
+        free((void *) local);
         return PROCESS_NONE;
     }
 #endif
@@ -184,8 +197,8 @@ adb_push(const char *serial, const char *local, const char *remote) {
     process_t proc = adb_execute(serial, adb_cmd, ARRAY_LEN(adb_cmd));
 
 #ifdef __WINDOWS__
-    SDL_free((void *) remote);
-    SDL_free((void *) local);
+    free((void *) remote);
+    free((void *) local);
 #endif
 
     return proc;
@@ -206,26 +219,8 @@ adb_install(const char *serial, const char *local) {
     process_t proc = adb_execute(serial, adb_cmd, ARRAY_LEN(adb_cmd));
 
 #ifdef __WINDOWS__
-    SDL_free((void *) local);
+    free((void *) local);
 #endif
 
     return proc;
-}
-
-bool
-process_check_success(process_t proc, const char *name) {
-    if (proc == PROCESS_NONE) {
-        LOGE("Could not execute \"%s\"", name);
-        return false;
-    }
-    exit_code_t exit_code;
-    if (!cmd_simple_wait(proc, &exit_code)) {
-        if (exit_code != NO_EXIT_CODE) {
-            LOGE("\"%s\" returned with value %" PRIexitcode, name, exit_code);
-        } else {
-            LOGE("\"%s\" exited unexpectedly", name);
-        }
-        return false;
-    }
-    return true;
 }

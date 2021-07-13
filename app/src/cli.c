@@ -6,10 +6,12 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include "config.h"
 #include "scrcpy.h"
 #include "util/log.h"
 #include "util/str_util.h"
+
+#define STR_IMPL_(x) #x
+#define STR(x) STR_IMPL_(x)
 
 void
 scrcpy_print_usage(const char *arg0) {
@@ -24,7 +26,7 @@ scrcpy_print_usage(const char *arg0) {
         "    -b, --bit-rate value\n"
         "        Encode the video at the given bit-rate, expressed in bits/s.\n"
         "        Unit suffixes are supported: 'K' (x1000) and 'M' (x1000000).\n"
-        "        Default is %d.\n"
+        "        Default is " STR(DEFAULT_BIT_RATE) ".\n"
         "\n"
         "    --codec-options key[:type]=value[,...]\n"
         "        Set a list of comma-separated key:type=value options for the\n"
@@ -77,12 +79,15 @@ scrcpy_print_usage(const char *arg0) {
         "        This is a workaround for some devices not behaving as\n"
         "        expected when setting the device clipboard programmatically.\n"
         "\n"
-        "    --lock-video-orientation value\n"
+        "    --lock-video-orientation [value]\n"
         "        Lock video orientation to value.\n"
-        "        Possible values are -1 (unlocked), 0, 1, 2 and 3.\n"
+        "        Possible values are \"unlocked\", \"initial\" (locked to the\n"
+        "        initial orientation), 0, 1, 2 and 3.\n"
         "        Natural device orientation is 0, and each increment adds a\n"
         "        90 degrees rotation counterclockwise.\n"
-        "        Default is %d%s.\n"
+        "        Default is \"unlocked\".\n"
+        "        Passing the option without argument is equivalent to passing\n"
+        "        \"initial\".\n"
         "\n"
         "    --max-fps value\n"
         "        Limit the frame rate of screen capture (officially supported\n"
@@ -92,7 +97,7 @@ scrcpy_print_usage(const char *arg0) {
         "        Limit both the width and height of the video to value. The\n"
         "        other dimension is computed so that the device aspect-ratio\n"
         "        is preserved.\n"
-        "        Default is %d%s.\n"
+        "        Default is 0 (unlimited).\n"
         "\n"
         "    -n, --no-control\n"
         "        Disable device control (mirror the device in read-only).\n"
@@ -111,7 +116,8 @@ scrcpy_print_usage(const char *arg0) {
         "\n"
         "    -p, --port port[:port]\n"
         "        Set the TCP port (range) used by the client to listen.\n"
-        "        Default is %d:%d.\n"
+        "        Default is " STR(DEFAULT_LOCAL_PORT_RANGE_FIRST) ":"
+                              STR(DEFAULT_LOCAL_PORT_RANGE_LAST) ".\n"
         "\n"
         "    --prefer-text\n"
         "        Inject alpha characters and space as text events instead of\n"
@@ -123,7 +129,7 @@ scrcpy_print_usage(const char *arg0) {
         "    --push-target path\n"
         "        Set the target directory for pushing files to the device by\n"
         "        drag & drop. It is passed as-is to \"adb push\".\n"
-        "        Default is \"/sdcard/\".\n"
+        "        Default is \"/sdcard/Download/\".\n"
         "\n"
         "    -r, --record file.mp4\n"
         "        Record screen to file.\n"
@@ -139,12 +145,6 @@ scrcpy_print_usage(const char *arg0) {
         "        Supported names are currently \"direct3d\", \"opengl\",\n"
         "        \"opengles2\", \"opengles\", \"metal\" and \"software\".\n"
         "        <https://wiki.libsdl.org/SDL_HINT_RENDER_DRIVER>\n"
-        "\n"
-        "    --render-expired-frames\n"
-        "        By default, to minimize latency, scrcpy always renders the\n"
-        "        last available decoded frame, and drops any previous ones.\n"
-        "        This flag forces to render all frames, at a cost of a\n"
-        "        possible increased latency.\n"
         "\n"
         "    --rotation value\n"
         "        Set the initial display rotation.\n"
@@ -176,16 +176,23 @@ scrcpy_print_usage(const char *arg0) {
         "        on exit.\n"
         "        It only shows physical touches (not clicks from scrcpy).\n"
         "\n"
-        "    -v, --version\n"
-        "        Print the version of scrcpy.\n"
+#ifdef HAVE_V4L2
+        "    --v4l2-sink /dev/videoN\n"
+        "        Output to v4l2loopback device.\n"
+        "        It requires to lock the video orientation (see\n"
+        "        --lock-video-orientation).\n"
         "\n"
+#endif
         "    -V, --verbosity value\n"
-        "        Set the log level (debug, info, warn or error).\n"
+        "        Set the log level (verbose, debug, info, warn or error).\n"
 #ifndef NDEBUG
         "        Default is debug.\n"
 #else
         "        Default is info.\n"
 #endif
+        "\n"
+        "    -v, --version\n"
+        "        Print the version of scrcpy.\n"
         "\n"
         "    -w, --stay-awake\n"
         "        Keep the device on while scrcpy is running, when the device\n"
@@ -210,7 +217,7 @@ scrcpy_print_usage(const char *arg0) {
         "        Default is 0 (automatic).\n"
         "\n"
         "    --window-height value\n"
-        "        Set the initial window width.\n"
+        "        Set the initial window height.\n"
         "        Default is 0 (automatic).\n"
         "\n"
         "Shortcuts:\n"
@@ -298,12 +305,7 @@ scrcpy_print_usage(const char *arg0) {
         "\n"
         "    Drag & drop APK file\n"
         "        Install APK from computer\n"
-        "\n",
-        arg0,
-        DEFAULT_BIT_RATE,
-        DEFAULT_LOCK_VIDEO_ORIENTATION, DEFAULT_LOCK_VIDEO_ORIENTATION >= 0 ? "" : " (unlocked)",
-        DEFAULT_MAX_SIZE, DEFAULT_MAX_SIZE ? "" : " (unlimited)",
-        DEFAULT_LOCAL_PORT_RANGE_FIRST, DEFAULT_LOCAL_PORT_RANGE_LAST);
+        "\n", arg0);
 }
 
 static bool
@@ -391,15 +393,27 @@ parse_max_fps(const char *s, uint16_t *max_fps) {
 }
 
 static bool
-parse_lock_video_orientation(const char *s, int8_t *lock_video_orientation) {
+parse_lock_video_orientation(const char *s,
+                             enum sc_lock_video_orientation *lock_mode) {
+    if (!s || !strcmp(s, "initial")) {
+        // Without argument, lock the initial orientation
+        *lock_mode = SC_LOCK_VIDEO_ORIENTATION_INITIAL;
+        return true;
+    }
+
+    if (!strcmp(s, "unlocked")) {
+        *lock_mode = SC_LOCK_VIDEO_ORIENTATION_UNLOCKED;
+        return true;
+    }
+
     long value;
-    bool ok = parse_integer_arg(s, &value, false, -1, 3,
+    bool ok = parse_integer_arg(s, &value, false, 0, 3,
                                 "lock video orientation");
     if (!ok) {
         return false;
     }
 
-    *lock_video_orientation = (int8_t) value;
+    *lock_mode = (enum sc_lock_video_orientation) value;
     return true;
 }
 
@@ -478,19 +492,24 @@ parse_port_range(const char *s, struct sc_port_range *port_range) {
 }
 
 static bool
-parse_display_id(const char *s, uint16_t *display_id) {
+parse_display_id(const char *s, uint32_t *display_id) {
     long value;
-    bool ok = parse_integer_arg(s, &value, false, 0, 0xFFFF, "display id");
+    bool ok = parse_integer_arg(s, &value, false, 0, 0x7FFFFFFF, "display id");
     if (!ok) {
         return false;
     }
 
-    *display_id = (uint16_t) value;
+    *display_id = (uint32_t) value;
     return true;
 }
 
 static bool
 parse_log_level(const char *s, enum sc_log_level *log_level) {
+    if (!strcmp(s, "verbose")) {
+        *log_level = SC_LOG_LEVEL_VERBOSE;
+        return true;
+    }
+
     if (!strcmp(s, "debug")) {
         *log_level = SC_LOG_LEVEL_DEBUG;
         return true;
@@ -668,6 +687,8 @@ guess_record_format(const char *filename) {
 #define OPT_FORWARD_ALL_CLICKS     1023
 #define OPT_LEGACY_PASTE           1024
 #define OPT_ENCODER_NAME           1025
+#define OPT_POWER_OFF_ON_CLOSE     1026
+#define OPT_V4L2_SINK              1027
 
 bool
 scrcpy_parse_args(struct scrcpy_cli_args *args, int argc, char *argv[]) {
@@ -687,7 +708,7 @@ scrcpy_parse_args(struct scrcpy_cli_args *args, int argc, char *argv[]) {
         {"fullscreen",             no_argument,       NULL, 'f'},
         {"help",                   no_argument,       NULL, 'h'},
         {"legacy-paste",           no_argument,       NULL, OPT_LEGACY_PASTE},
-        {"lock-video-orientation", required_argument, NULL,
+        {"lock-video-orientation", optional_argument, NULL,
                                                   OPT_LOCK_VIDEO_ORIENTATION},
         {"max-fps",                required_argument, NULL, OPT_MAX_FPS},
         {"max-size",               required_argument, NULL, 'm'},
@@ -709,6 +730,9 @@ scrcpy_parse_args(struct scrcpy_cli_args *args, int argc, char *argv[]) {
         {"show-touches",           no_argument,       NULL, 't'},
         {"stay-awake",             no_argument,       NULL, 'w'},
         {"turn-screen-off",        no_argument,       NULL, 'S'},
+#ifdef HAVE_V4L2
+        {"v4l2-sink",              required_argument, NULL, OPT_V4L2_SINK},
+#endif
         {"verbosity",              required_argument, NULL, 'V'},
         {"version",                no_argument,       NULL, 'v'},
         {"window-title",           required_argument, NULL, OPT_WINDOW_TITLE},
@@ -718,6 +742,8 @@ scrcpy_parse_args(struct scrcpy_cli_args *args, int argc, char *argv[]) {
         {"window-height",          required_argument, NULL, OPT_WINDOW_HEIGHT},
         {"window-borderless",      no_argument,       NULL,
                                                   OPT_WINDOW_BORDERLESS},
+        {"power-off-on-close",     no_argument,       NULL,
+                                                  OPT_POWER_OFF_ON_CLOSE},
         {NULL,                     0,                 NULL, 0  },
     };
 
@@ -770,7 +796,8 @@ scrcpy_parse_args(struct scrcpy_cli_args *args, int argc, char *argv[]) {
                 }
                 break;
             case OPT_LOCK_VIDEO_ORIENTATION:
-                if (!parse_lock_video_orientation(optarg, &opts->lock_video_orientation)) {
+                if (!parse_lock_video_orientation(optarg,
+                        &opts->lock_video_orientation)) {
                     return false;
                 }
                 break;
@@ -815,7 +842,8 @@ scrcpy_parse_args(struct scrcpy_cli_args *args, int argc, char *argv[]) {
                 opts->stay_awake = true;
                 break;
             case OPT_RENDER_EXPIRED_FRAMES:
-                opts->render_expired_frames = true;
+                LOGW("Option --render-expired-frames has been removed. This "
+                     "flag has been ignored.");
                 break;
             case OPT_WINDOW_TITLE:
                 opts->window_title = optarg;
@@ -886,16 +914,39 @@ scrcpy_parse_args(struct scrcpy_cli_args *args, int argc, char *argv[]) {
             case OPT_LEGACY_PASTE:
                 opts->legacy_paste = true;
                 break;
+            case OPT_POWER_OFF_ON_CLOSE:
+                opts->power_off_on_close = true;
+                break;
+#ifdef HAVE_V4L2
+            case OPT_V4L2_SINK:
+                opts->v4l2_device = optarg;
+                break;
+#endif
             default:
                 // getopt prints the error message on stderr
                 return false;
         }
     }
 
+#ifdef HAVE_V4L2
+    if (!opts->display && !opts->record_filename && !opts->v4l2_device) {
+        LOGE("-N/--no-display requires either screen recording (-r/--record)"
+             " or sink to v4l2loopback device (--v4l2-sink)");
+        return false;
+    }
+
+    if (opts->v4l2_device && opts->lock_video_orientation
+                             == SC_LOCK_VIDEO_ORIENTATION_UNLOCKED) {
+        LOGI("Video orientation is locked for v4l2 sink. "
+             "See --lock-video-orientation.");
+        opts->lock_video_orientation = SC_LOCK_VIDEO_ORIENTATION_INITIAL;
+    }
+#else
     if (!opts->display && !opts->record_filename) {
         LOGE("-N/--no-display requires screen recording (-r/--record)");
         return false;
     }
+#endif
 
     int index = optind;
     if (index < argc) {
@@ -911,7 +962,8 @@ scrcpy_parse_args(struct scrcpy_cli_args *args, int argc, char *argv[]) {
     if (opts->record_filename && !opts->record_format) {
         opts->record_format = guess_record_format(opts->record_filename);
         if (!opts->record_format) {
-            LOGE("No format specified for \"%s\" (try with -F mkv)",
+            LOGE("No format specified for \"%s\" "
+                 "(try with --record-format=mkv)",
                  opts->record_filename);
             return false;
         }

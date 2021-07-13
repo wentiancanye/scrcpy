@@ -1,17 +1,4 @@
-// for portability (kill, readlink, strdup, strtok_r)
-#define _POSIX_C_SOURCE 200809L
-#define _BSD_SOURCE
-
-// modern glibc will complain without this
-#define _DEFAULT_SOURCE
-
-#ifdef __APPLE__
-# define _DARWIN_C_SOURCE // for strdup(), strtok_r(), memset_pattern4()
-#endif
-
-#include "command.h"
-
-#include "config.h"
+#include "util/process.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -27,7 +14,7 @@
 #include "util/log.h"
 
 bool
-cmd_search(const char *file) {
+search_executable(const char *file) {
     char *path = getenv("PATH");
     if (!path)
         return false;
@@ -63,7 +50,7 @@ cmd_search(const char *file) {
 }
 
 enum process_result
-cmd_execute(const char *const argv[], pid_t *pid) {
+process_execute(const char *const argv[], pid_t *pid) {
     int fd[2];
 
     if (pipe(fd) == -1) {
@@ -125,29 +112,37 @@ end:
 }
 
 bool
-cmd_terminate(pid_t pid) {
+process_terminate(pid_t pid) {
     if (pid <= 0) {
         LOGC("Requested to kill %d, this is an error. Please report the bug.\n",
              (int) pid);
         abort();
     }
-    return kill(pid, SIGTERM) != -1;
+    return kill(pid, SIGKILL) != -1;
 }
 
-bool
-cmd_simple_wait(pid_t pid, int *exit_code) {
-    int status;
+exit_code_t
+process_wait(pid_t pid, bool close) {
     int code;
-    if (waitpid(pid, &status, 0) == -1 || !WIFEXITED(status)) {
+    int options = WEXITED;
+    if (!close) {
+        options |= WNOWAIT;
+    }
+
+    siginfo_t info;
+    int r = waitid(P_PID, pid, &info, options);
+    if (r == -1 || info.si_code != CLD_EXITED) {
         // could not wait, or exited unexpectedly, probably by a signal
-        code = -1;
+        code = NO_EXIT_CODE;
     } else {
-        code = WEXITSTATUS(status);
+        code = info.si_status;
     }
-    if (exit_code) {
-        *exit_code = code;
-    }
-    return !code;
+    return code;
+}
+
+void
+process_close(pid_t pid) {
+    process_wait(pid, true); // ignore exit code
 }
 
 char *
@@ -161,7 +156,7 @@ get_executable_path(void) {
         return NULL;
     }
     buf[len] = '\0';
-    return SDL_strdup(buf);
+    return strdup(buf);
 #else
     // in practice, we only need this feature for portable builds, only used on
     // Windows, so we don't care implementing it for every platform

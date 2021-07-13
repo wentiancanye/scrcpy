@@ -1,8 +1,9 @@
+#include "common.h"
+
 #include <assert.h>
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
-#include <SDL2/SDL.h>
 
 #include "util/str_util.h"
 
@@ -136,7 +137,7 @@ static void test_strquote(void) {
     // add '"' at the beginning and the end
     assert(!strcmp("\"abcde\"", out));
 
-    SDL_free(out);
+    free(out);
 }
 
 static void test_utf8_truncate(void) {
@@ -286,6 +287,18 @@ static void test_parse_integer_with_suffix(void) {
     assert(!ok);
 }
 
+static void test_strlist_contains(void) {
+    assert(strlist_contains("a,bc,def", ',', "bc"));
+    assert(!strlist_contains("a,bc,def", ',', "b"));
+    assert(strlist_contains("", ',', ""));
+    assert(strlist_contains("abc,", ',', ""));
+    assert(strlist_contains(",abc", ',', ""));
+    assert(strlist_contains("abc,,def", ',', ""));
+    assert(!strlist_contains("abc", ',', ""));
+    assert(strlist_contains(",,|x", '|', ",,"));
+    assert(strlist_contains("xyz", '\0', "xyz"));
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -303,5 +316,6 @@ int main(int argc, char *argv[]) {
     test_parse_integer();
     test_parse_integers();
     test_parse_integer_with_suffix();
+    test_strlist_contains();
     return 0;
 }

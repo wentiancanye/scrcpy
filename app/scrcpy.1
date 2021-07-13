@@ -83,10 +83,12 @@ Inject computer clipboard text as a sequence of key events on Ctrl+v (like MOD+S
 This is a workaround for some devices not behaving as expected when setting the device clipboard programmatically.
 
 .TP
-.BI "\-\-lock\-video\-orientation " value
-Lock video orientation to \fIvalue\fR. Possible values are -1 (unlocked), 0, 1, 2 and 3. Natural device orientation is 0, and each increment adds a 90 degrees otation counterclockwise.
+.BI "\-\-lock\-video\-orientation " [value]
+Lock video orientation to \fIvalue\fR. Possible values are "unlocked", "initial" (locked to the initial orientation), 0, 1, 2 and 3. Natural device orientation is 0, and each increment adds a 90 degrees otation counterclockwise.
 
-Default is -1 (unlocked).
+Default is "unlocked".
+
+Passing the option without argument is equivalent to passing "initial".
 
 .TP
 .BI "\-\-max\-fps " value
@@ -131,7 +133,7 @@ but breaks the expected behavior of alpha keys in games (typically WASD).
 .BI "\-\-push\-target " path
 Set the target directory for pushing files to the device by drag & drop. It is passed as\-is to "adb push".
 
-Default is "/sdcard/".
+Default is "/sdcard/Download/".
 
 .TP
 .BI "\-r, \-\-record " file
@@ -154,10 +156,6 @@ Supported names are currently "direct3d", "opengl", "opengles2", "opengles", "me
 
 .UR https://wiki.libsdl.org/SDL_HINT_RENDER_DRIVER
 .UE
-
-.TP
-.B \-\-render\-expired\-frames
-By default, to minimize latency, scrcpy always renders the last available decoded frame, and drops any previous ones. This flag forces to render all frames, at a cost of a possible increased latency.
 
 .TP
 .BI "\-\-rotation " value
@@ -188,14 +186,20 @@ Enable "show touches" on start, restore the initial value on exit.
 It only shows physical touches (not clicks from scrcpy).
 
 .TP
-.B \-v, \-\-version
-Print the version of scrcpy.
+.BI "\-\-v4l2-sink " /dev/videoN
+Output to v4l2loopback device.
+
+It requires to lock the video orientation (see --lock-video-orientation).
 
 .TP
 .BI "\-V, \-\-verbosity " value
-Set the log level ("debug", "info", "warn" or "error").
+Set the log level ("verbose", "debug", "info", "warn" or "error").
 
 Default is "info" for release builds, "debug" for debug builds.
+
+.TP
+.B \-v, \-\-version
+Print the version of scrcpy.
 
 .TP
 .B \-w, \-\-stay-awake

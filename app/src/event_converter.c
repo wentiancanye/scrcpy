@@ -1,7 +1,5 @@
 #include "event_converter.h"
 
-#include "config.h"
-
 #define MAP(FROM, TO) case FROM: *to = TO; return true
 #define FAIL default: return false
 
@@ -16,7 +14,7 @@ convert_keycode_action(SDL_EventType from, enum android_keyevent_action *to) {
 
 static enum android_metastate
 autocomplete_metastate(enum android_metastate metastate) {
-    // fill dependant flags
+    // fill dependent flags
     if (metastate & (AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_RIGHT_ON)) {
         metastate |= AMETA_SHIFT_ON;
     }

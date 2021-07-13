@@ -1,13 +1,14 @@
 #ifndef SCRCPY_H
 #define SCRCPY_H
 
+#include "common.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include "config.h"
-
 enum sc_log_level {
+    SC_LOG_LEVEL_VERBOSE,
     SC_LOG_LEVEL_DEBUG,
     SC_LOG_LEVEL_INFO,
     SC_LOG_LEVEL_WARN,
@@ -18,6 +19,16 @@ enum sc_record_format {
     SC_RECORD_FORMAT_AUTO,
     SC_RECORD_FORMAT_MP4,
     SC_RECORD_FORMAT_MKV,
+};
+
+enum sc_lock_video_orientation {
+    SC_LOCK_VIDEO_ORIENTATION_UNLOCKED = -1,
+    // lock the current orientation when scrcpy starts
+    SC_LOCK_VIDEO_ORIENTATION_INITIAL = -2,
+    SC_LOCK_VIDEO_ORIENTATION_0 = 0,
+    SC_LOCK_VIDEO_ORIENTATION_1,
+    SC_LOCK_VIDEO_ORIENTATION_2,
+    SC_LOCK_VIDEO_ORIENTATION_3,
 };
 
 #define SC_MAX_SHORTCUT_MODS 8
@@ -52,6 +63,7 @@ struct scrcpy_options {
     const char *render_driver;
     const char *codec_options;
     const char *encoder_name;
+    const char *v4l2_device;
     enum sc_log_level log_level;
     enum sc_record_format record_format;
     struct sc_port_range port_range;
@@ -59,20 +71,19 @@ struct scrcpy_options {
     uint16_t max_size;
     uint32_t bit_rate;
     uint16_t max_fps;
-    int8_t lock_video_orientation;
+    enum sc_lock_video_orientation lock_video_orientation;
     uint8_t rotation;
     int16_t window_x; // SC_WINDOW_POSITION_UNDEFINED for "auto"
     int16_t window_y; // SC_WINDOW_POSITION_UNDEFINED for "auto"
     uint16_t window_width;
     uint16_t window_height;
-    uint16_t display_id;
+    uint32_t display_id;
     bool show_touches;
     bool fullscreen;
     bool always_on_top;
     bool control;
     bool display;
     bool turn_screen_off;
-    bool render_expired_frames;
     bool prefer_text;
     bool window_borderless;
     bool mipmaps;
@@ -82,6 +93,7 @@ struct scrcpy_options {
     bool forward_key_repeat;
     bool forward_all_clicks;
     bool legacy_paste;
+    bool power_off_on_close;
 };
 
 #define SCRCPY_OPTIONS_DEFAULT { \
@@ -93,6 +105,7 @@ struct scrcpy_options {
     .render_driver = NULL, \
     .codec_options = NULL, \
     .encoder_name = NULL, \
+    .v4l2_device = NULL, \
     .log_level = SC_LOG_LEVEL_INFO, \
     .record_format = SC_RECORD_FORMAT_AUTO, \
     .port_range = { \
@@ -103,10 +116,10 @@ struct scrcpy_options {
         .data = {SC_MOD_LALT, SC_MOD_LSUPER}, \
         .count = 2, \
     }, \
-    .max_size = DEFAULT_MAX_SIZE, \
+    .max_size = 0, \
     .bit_rate = DEFAULT_BIT_RATE, \
     .max_fps = 0, \
-    .lock_video_orientation = DEFAULT_LOCK_VIDEO_ORIENTATION, \
+    .lock_video_orientation = SC_LOCK_VIDEO_ORIENTATION_UNLOCKED, \
     .rotation = 0, \
     .window_x = SC_WINDOW_POSITION_UNDEFINED, \
     .window_y = SC_WINDOW_POSITION_UNDEFINED, \
@@ -119,7 +132,6 @@ struct scrcpy_options {
     .control = true, \
     .display = true, \
     .turn_screen_off = false, \
-    .render_expired_frames = false, \
     .prefer_text = false, \
     .window_borderless = false, \
     .mipmaps = true, \
@@ -129,6 +141,7 @@ struct scrcpy_options {
     .forward_key_repeat = true, \
     .forward_all_clicks = false, \
     .legacy_paste = false, \
+    .power_off_on_close = false, \
 }
 
 bool

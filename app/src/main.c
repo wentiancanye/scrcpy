@@ -1,15 +1,18 @@
 #include "scrcpy.h"
 
+#include "common.h"
+
 #include <assert.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include <libavformat/avformat.h>
+#ifdef HAVE_V4L2
+# include <libavdevice/avdevice.h>
+#endif
 #define SDL_MAIN_HANDLED // avoid link error on Linux Windows Subsystem
 #include <SDL2/SDL.h>
 
-#include "config.h"
 #include "cli.h"
-#include "compat.h"
 #include "util/log.h"
 
 static void
@@ -28,25 +31,12 @@ print_version(void) {
     fprintf(stderr, " - libavutil %d.%d.%d\n", LIBAVUTIL_VERSION_MAJOR,
                                                LIBAVUTIL_VERSION_MINOR,
                                                LIBAVUTIL_VERSION_MICRO);
+#ifdef HAVE_V4L2
+    fprintf(stderr, " - libavdevice %d.%d.%d\n", LIBAVDEVICE_VERSION_MAJOR,
+                                                 LIBAVDEVICE_VERSION_MINOR,
+                                                 LIBAVDEVICE_VERSION_MICRO);
+#endif
 }
-
-static SDL_LogPriority
-convert_log_level_to_sdl(enum sc_log_level level) {
-    switch (level) {
-        case SC_LOG_LEVEL_DEBUG:
-            return SDL_LOG_PRIORITY_DEBUG;
-        case SC_LOG_LEVEL_INFO:
-            return SDL_LOG_PRIORITY_INFO;
-        case SC_LOG_LEVEL_WARN:
-            return SDL_LOG_PRIORITY_WARN;
-        case SC_LOG_LEVEL_ERROR:
-            return SDL_LOG_PRIORITY_ERROR;
-        default:
-            assert(!"unexpected log level");
-            return SDL_LOG_PRIORITY_INFO;
-    }
-}
-
 
 int
 main(int argc, char *argv[]) {
@@ -71,8 +61,7 @@ main(int argc, char *argv[]) {
         return 1;
     }
 
-    SDL_LogPriority sdl_log = convert_log_level_to_sdl(args.opts.log_level);
-    SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, sdl_log);
+    sc_set_log_level(args.opts.log_level);
 
     if (args.help) {
         scrcpy_print_usage(argv[0]);
@@ -89,6 +78,12 @@ main(int argc, char *argv[]) {
     LOGI("press MOD+J key to unlock screen. By Canye.");
 #ifdef SCRCPY_LAVF_REQUIRES_REGISTER_ALL
     av_register_all();
+#endif
+
+#ifdef HAVE_V4L2
+    if (args.opts.v4l2_device) {
+        avdevice_register_all();
+    }
 #endif
 
     if (avformat_network_init()) {

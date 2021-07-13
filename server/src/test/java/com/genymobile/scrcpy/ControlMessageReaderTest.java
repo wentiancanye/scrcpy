@@ -154,6 +154,7 @@ public class ControlMessageReaderTest {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         DataOutputStream dos = new DataOutputStream(bos);
         dos.writeByte(ControlMessage.TYPE_BACK_OR_SCREEN_ON);
+        dos.writeByte(KeyEvent.ACTION_UP);
 
         byte[] packet = bos.toByteArray();
 
@@ -161,6 +162,7 @@ public class ControlMessageReaderTest {
         ControlMessage event = reader.next();
 
         Assert.assertEquals(ControlMessage.TYPE_BACK_OR_SCREEN_ON, event.getType());
+        Assert.assertEquals(KeyEvent.ACTION_UP, event.getAction());
     }
 
     @Test
@@ -180,19 +182,35 @@ public class ControlMessageReaderTest {
     }
 
     @Test
-    public void testParseCollapseNotificationPanelEvent() throws IOException {
+    public void testParseExpandSettingsPanelEvent() throws IOException {
         ControlMessageReader reader = new ControlMessageReader();
 
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         DataOutputStream dos = new DataOutputStream(bos);
-        dos.writeByte(ControlMessage.TYPE_COLLAPSE_NOTIFICATION_PANEL);
+        dos.writeByte(ControlMessage.TYPE_EXPAND_SETTINGS_PANEL);
 
         byte[] packet = bos.toByteArray();
 
         reader.readFrom(new ByteArrayInputStream(packet));
         ControlMessage event = reader.next();
 
-        Assert.assertEquals(ControlMessage.TYPE_COLLAPSE_NOTIFICATION_PANEL, event.getType());
+        Assert.assertEquals(ControlMessage.TYPE_EXPAND_SETTINGS_PANEL, event.getType());
+    }
+
+    @Test
+    public void testParseCollapsePanelsEvent() throws IOException {
+        ControlMessageReader reader = new ControlMessageReader();
+
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        DataOutputStream dos = new DataOutputStream(bos);
+        dos.writeByte(ControlMessage.TYPE_COLLAPSE_PANELS);
+
+        byte[] packet = bos.toByteArray();
+
+        reader.readFrom(new ByteArrayInputStream(packet));
+        ControlMessage event = reader.next();
+
+        Assert.assertEquals(ControlMessage.TYPE_COLLAPSE_PANELS, event.getType());
     }
 
     @Test

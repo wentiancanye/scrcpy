@@ -1,10 +1,10 @@
 #ifndef STRUTIL_H
 #define STRUTIL_H
 
+#include "common.h"
+
 #include <stdbool.h>
 #include <stddef.h>
-
-#include "config.h"
 
 // like strncpy, except:
 //  - it copies at most n-1 chars
@@ -16,7 +16,7 @@ size_t
 xstrncpy(char *dest, const char *src, size_t n);
 
 // join tokens by sep into dst
-// returns the number of chars actually written (max n-1) if no trucation
+// returns the number of chars actually written (max n-1) if no truncation
 // occurred, or n if truncated
 size_t
 xstrjoin(char *dst, const char *const tokens[], char sep, size_t n);
@@ -42,6 +42,11 @@ parse_integers(const char *s, const char sep, size_t max_items, long *out);
 // returns true if the conversion succeeded, false otherwise
 bool
 parse_integer_with_suffix(const char *s, long *out);
+
+// search s in the list separated by sep
+// for example, strlist_contains("a,bc,def", ',', "bc") returns true
+bool
+strlist_contains(const char *list, char sep, const char *s);
 
 // return the index to truncate a UTF-8 string at a valid position
 size_t

@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
 
 public class Controller {
 
-    private static final int DEVICE_ID_VIRTUAL = -1;
+    private static final int DEFAULT_DEVICE_ID = 0;
 
     private static final ScheduledExecutorService EXECUTOR = Executors.newSingleThreadScheduledExecutor();
 
@@ -45,7 +45,7 @@ public class Controller {
 
             MotionEvent.PointerCoords coords = new MotionEvent.PointerCoords();
             coords.orientation = 0;
-            coords.size = 1;
+            coords.size = 0;
 
             pointerProperties[i] = props;
             pointerCoords[i] = coords;
@@ -55,7 +55,7 @@ public class Controller {
     public void control() throws IOException {
         // on start, power on the device
         if (!Device.isScreenOn()) {
-            device.injectKeycode(KeyEvent.KEYCODE_POWER);
+            device.pressReleaseKeycode(KeyEvent.KEYCODE_POWER);
 
             // dirty hack
             // After POWER is injected, the device is powered on asynchronously.
@@ -101,13 +101,16 @@ public class Controller {
                 break;
             case ControlMessage.TYPE_BACK_OR_SCREEN_ON:
                 if (device.supportsInputEvents()) {
-                    pressBackOrTurnScreenOn();
+                    pressBackOrTurnScreenOn(msg.getAction());
                 }
                 break;
             case ControlMessage.TYPE_EXPAND_NOTIFICATION_PANEL:
                 Device.expandNotificationPanel();
                 break;
-            case ControlMessage.TYPE_COLLAPSE_NOTIFICATION_PANEL:
+            case ControlMessage.TYPE_EXPAND_SETTINGS_PANEL:
+                Device.expandSettingsPanel();
+                break;
+            case ControlMessage.TYPE_COLLAPSE_PANELS:
                 Device.collapsePanels();
                 break;
             case ControlMessage.TYPE_GET_CLIPBOARD:
@@ -211,9 +214,13 @@ public class Controller {
         // Right-click and middle-click only work if the source is a mouse
         boolean nonPrimaryButtonPressed = (buttons & ~MotionEvent.BUTTON_PRIMARY) != 0;
         int source = nonPrimaryButtonPressed ? InputDevice.SOURCE_MOUSE : InputDevice.SOURCE_TOUCHSCREEN;
+        if (source != InputDevice.SOURCE_MOUSE) {
+            // Buttons must not be set for touch events
+            buttons = 0;
+        }
 
         MotionEvent event = MotionEvent
-                .obtain(lastTouchDown, now, action, pointerCount, pointerProperties, pointerCoords, 0, buttons, 1f, 1f, DEVICE_ID_VIRTUAL, 0, source,
+                .obtain(lastTouchDown, now, action, pointerCount, pointerProperties, pointerCoords, 0, buttons, 1f, 1f, DEFAULT_DEVICE_ID, 0, source,
                         0);
         return device.injectEvent(event);
     }
@@ -236,7 +243,7 @@ public class Controller {
         coords.setAxisValue(MotionEvent.AXIS_VSCROLL, vScroll);
 
         MotionEvent event = MotionEvent
-                .obtain(lastTouchDown, now, MotionEvent.ACTION_SCROLL, 1, pointerProperties, pointerCoords, 0, 0, 1f, 1f, DEVICE_ID_VIRTUAL, 0,
+                .obtain(lastTouchDown, now, MotionEvent.ACTION_SCROLL, 1, pointerProperties, pointerCoords, 0, 0, 1f, 1f, DEFAULT_DEVICE_ID, 0,
                         InputDevice.SOURCE_TOUCHSCREEN, 0);
         return device.injectEvent(event);
     }
@@ -254,12 +261,22 @@ public class Controller {
         }, 200, TimeUnit.MILLISECONDS);
     }
 
-    private boolean pressBackOrTurnScreenOn() {
-        int keycode = Device.isScreenOn() ? KeyEvent.KEYCODE_BACK : KeyEvent.KEYCODE_POWER;
-        if (keepPowerModeOff && keycode == KeyEvent.KEYCODE_POWER) {
+    private boolean pressBackOrTurnScreenOn(int action) {
+        if (Device.isScreenOn()) {
+            return device.injectKeyEvent(action, KeyEvent.KEYCODE_BACK, 0, 0);
+        }
+
+        // Screen is off
+        // Only press POWER on ACTION_DOWN
+        if (action != KeyEvent.ACTION_DOWN) {
+            // do nothing,
+            return true;
+        }
+
+        if (keepPowerModeOff) {
             schedulePowerModeOff();
         }
-        return device.injectKeycode(keycode);
+        return device.pressReleaseKeycode(KeyEvent.KEYCODE_POWER);
     }
 
     private boolean setClipboard(String text, boolean paste) {
@@ -270,7 +287,7 @@ public class Controller {
 
         // On Android >= 7, also press the PASTE key if requested
         if (paste && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && device.supportsInputEvents()) {
-            device.injectKeycode(KeyEvent.KEYCODE_PASTE);
+            device.pressReleaseKeycode(KeyEvent.KEYCODE_PASTE);
         }
 
         return ok;

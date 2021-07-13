@@ -3,9 +3,7 @@
 #include <assert.h>
 #include <SDL2/SDL_keycode.h>
 
-#include "config.h"
 #include "event_converter.h"
-#include "util/lock.h"
 #include "util/log.h"
 
 static const int ACTION_DOWN = 1;
@@ -54,9 +52,13 @@ is_shortcut_mod(struct input_manager *im, uint16_t sdl_mod) {
 }
 
 void
-input_manager_init(struct input_manager *im,
-                   const struct scrcpy_options *options)
-{
+input_manager_init(struct input_manager *im, struct controller *controller,
+                   struct screen *screen,
+                   const struct scrcpy_options *options) {
+    im->controller = controller;
+    im->screen = screen;
+    im->repeat = 0;
+
     im->control = options->control;
     im->forward_key_repeat = options->forward_key_repeat;
     im->prefer_text = options->prefer_text;
@@ -74,6 +76,10 @@ input_manager_init(struct input_manager *im,
     im->sdl_shortcut_mods.count = shortcut_mods->count;
 
     im->vfinger_down = false;
+
+    im->last_keycode = SDLK_UNKNOWN;
+    im->last_mod = 0;
+    im->key_repeat = 0;
 }
 
 static void
@@ -148,13 +154,25 @@ action_cut(struct controller *controller, int actions) {
 }
 
 // turn the screen on if it was off, press BACK otherwise
+// If the screen is off, it is turned on only on ACTION_DOWN
 static void
-press_back_or_turn_screen_on(struct controller *controller) {
+press_back_or_turn_screen_on(struct controller *controller, int actions) {
     struct control_msg msg;
     msg.type = CONTROL_MSG_TYPE_BACK_OR_SCREEN_ON;
 
-    if (!controller_push_msg(controller, &msg)) {
-        LOGW("Could not request 'press back or turn screen on'");
+    if (actions & ACTION_DOWN) {
+        msg.back_or_screen_on.action = AKEY_EVENT_ACTION_DOWN;
+        if (!controller_push_msg(controller, &msg)) {
+            LOGW("Could not request 'press back or turn screen on'");
+            return;
+        }
+    }
+
+    if (actions & ACTION_UP) {
+        msg.back_or_screen_on.action = AKEY_EVENT_ACTION_UP;
+        if (!controller_push_msg(controller, &msg)) {
+            LOGW("Could not request 'press back or turn screen on'");
+        }
     }
 }
 
@@ -169,9 +187,19 @@ expand_notification_panel(struct controller *controller) {
 }
 
 static void
-collapse_notification_panel(struct controller *controller) {
+expand_settings_panel(struct controller *controller) {
     struct control_msg msg;
-    msg.type = CONTROL_MSG_TYPE_COLLAPSE_NOTIFICATION_PANEL;
+    msg.type = CONTROL_MSG_TYPE_EXPAND_SETTINGS_PANEL;
+
+    if (!controller_push_msg(controller, &msg)) {
+        LOGW("Could not request 'expand settings panel'");
+    }
+}
+
+static void
+collapse_panels(struct controller *controller) {
+    struct control_msg msg;
+    msg.type = CONTROL_MSG_TYPE_COLLAPSE_PANELS;
 
     if (!controller_push_msg(controller, &msg)) {
         LOGW("Could not request 'collapse notification panel'");
@@ -191,13 +219,20 @@ set_device_clipboard(struct controller *controller, bool paste) {
         return;
     }
 
+    char *text_dup = strdup(text);
+    SDL_free(text);
+    if (!text_dup) {
+        LOGW("Could not strdup input text");
+        return;
+    }
+
     struct control_msg msg;
     msg.type = CONTROL_MSG_TYPE_SET_CLIPBOARD;
-    msg.set_clipboard.text = text;
+    msg.set_clipboard.text = text_dup;
     msg.set_clipboard.paste = paste;
 
     if (!controller_push_msg(controller, &msg)) {
-        SDL_free(text);
+        free(text_dup);
         LOGW("Could not request 'set device clipboard'");
     }
 }
@@ -243,11 +278,18 @@ clipboard_paste(struct controller *controller) {
         return;
     }
 
+    char *text_dup = strdup(text);
+    SDL_free(text);
+    if (!text_dup) {
+        LOGW("Could not strdup input text");
+        return;
+    }
+
     struct control_msg msg;
     msg.type = CONTROL_MSG_TYPE_INJECT_TEXT;
-    msg.inject_text.text = text;
+    msg.inject_text.text = text_dup;
     if (!controller_push_msg(controller, &msg)) {
-        SDL_free(text);
+        free(text_dup);
         LOGW("Could not request 'paste clipboard'");
     }
 }
@@ -283,7 +325,7 @@ rotate_client_right(struct screen *screen) {
     screen_set_rotation(screen, new_rotation);
 }
 
-void
+static void
 input_manager_process_text_input(struct input_manager *im,
                                  const SDL_TextInputEvent *event) {
     if (is_shortcut_mod(im, SDL_GetModState())) {
@@ -301,13 +343,13 @@ input_manager_process_text_input(struct input_manager *im,
 
     struct control_msg msg;
     msg.type = CONTROL_MSG_TYPE_INJECT_TEXT;
-    msg.inject_text.text = SDL_strdup(event->text);
+    msg.inject_text.text = strdup(event->text);
     if (!msg.inject_text.text) {
         LOGW("Could not strdup input text");
         return;
     }
     if (!controller_push_msg(im->controller, &msg)) {
-        SDL_free(msg.inject_text.text);
+        free(msg.inject_text.text);
         LOGW("Could not request 'inject text'");
     }
 }
@@ -363,21 +405,32 @@ convert_input_key(const SDL_KeyboardEvent *from, struct control_msg *to,
     return true;
 }
 
-void
+static void
 input_manager_process_key(struct input_manager *im,
                           const SDL_KeyboardEvent *event) {
     // control: indicates the state of the command-line option --no-control
     bool control = im->control;
 
-    bool smod = is_shortcut_mod(im, event->keysym.mod);
-
     struct controller *controller = im->controller;
 
     SDL_Keycode keycode = event->keysym.sym;
+    uint16_t mod = event->keysym.mod;
     bool down = event->type == SDL_KEYDOWN;
     bool ctrl = event->keysym.mod & KMOD_CTRL;
     bool shift = event->keysym.mod & KMOD_SHIFT;
     bool repeat = event->repeat;
+
+    bool smod = is_shortcut_mod(im, mod);
+
+    if (down && !repeat) {
+        if (keycode == im->last_keycode && mod == im->last_mod) {
+            ++im->key_repeat;
+        } else {
+            im->key_repeat = 0;
+            im->last_keycode = keycode;
+            im->last_mod = mod;
+        }
+    }
 
     // The shortcut modifier is pressed
     if (smod) {
@@ -477,17 +530,17 @@ input_manager_process_key(struct input_manager *im,
                 return;
             case SDLK_i:
                 if (!shift && !repeat && down) {
-                    struct fps_counter *fps_counter =
-                        im->video_buffer->fps_counter;
-                    switch_fps_counter_state(fps_counter);
+                    switch_fps_counter_state(&im->screen->fps_counter);
                 }
                 return;
             case SDLK_n:
                 if (control && !repeat && down) {
                     if (shift) {
-                        collapse_notification_panel(controller);
-                    } else {
+                        collapse_panels(controller);
+                    } else if (im->key_repeat == 0) {
                         expand_notification_panel(controller);
+                    } else {
+                        expand_settings_panel(controller);
                     }
                 }
                 return;
@@ -554,11 +607,15 @@ convert_mouse_motion(const SDL_MouseMotionEvent *from, struct screen *screen,
     return true;
 }
 
-void
+static void
 input_manager_process_mouse_motion(struct input_manager *im,
                                    const SDL_MouseMotionEvent *event) {
-    if (!event->state) {
-        // do not send motion events when no button is pressed
+    uint32_t mask = SDL_BUTTON_LMASK;
+    if (im->forward_all_clicks) {
+        mask |= SDL_BUTTON_MMASK | SDL_BUTTON_RMASK;
+    }
+    if (!(event->state & mask)) {
+        // do not send motion events when no click is pressed
         return;
     }
     if (event->which == SDL_TOUCH_MOUSEID) {
@@ -608,7 +665,7 @@ convert_touch(const SDL_TouchFingerEvent *from, struct screen *screen,
     return true;
 }
 
-void
+static void
 input_manager_process_touch(struct input_manager *im,
                             const SDL_TouchFingerEvent *event) {
     struct control_msg msg;
@@ -640,7 +697,7 @@ convert_mouse_button(const SDL_MouseButtonEvent *from, struct screen *screen,
     return true;
 }
 
-void
+static void
 input_manager_process_mouse_button(struct input_manager *im,
                                    const SDL_MouseButtonEvent *event) {
     bool control = im->control;
@@ -651,13 +708,27 @@ input_manager_process_mouse_button(struct input_manager *im,
     }
 
     bool down = event->type == SDL_MOUSEBUTTONDOWN;
-    if (!im->forward_all_clicks && down) {
+    if (!im->forward_all_clicks) {
+        int action = down ? ACTION_DOWN : ACTION_UP;
+
+        if (control && event->button == SDL_BUTTON_X1) {
+            action_app_switch(im->controller, action);
+            return;
+        }
+        if (control && event->button == SDL_BUTTON_X2 && down) {
+            if (event->clicks < 2) {
+                expand_notification_panel(im->controller);
+            } else {
+                expand_settings_panel(im->controller);
+            }
+            return;
+        }
         if (control && event->button == SDL_BUTTON_RIGHT) {
-            press_back_or_turn_screen_on(im->controller);
+            press_back_or_turn_screen_on(im->controller, action);
             return;
         }
         if (control && event->button == SDL_BUTTON_MIDDLE) {
-            action_home(im->controller, ACTION_DOWN | ACTION_UP);
+            action_home(im->controller, action);
             return;
         }
 
@@ -670,7 +741,9 @@ input_manager_process_mouse_button(struct input_manager *im,
             bool outside = x < r->x || x >= r->x + r->w
                         || y < r->y || y >= r->y + r->h;
             if (outside) {
-                screen_resize_to_fit(im->screen);
+                if (down) {
+                    screen_resize_to_fit(im->screen);
+                }
                 return;
             }
         }
@@ -739,7 +812,7 @@ convert_mouse_wheel(const SDL_MouseWheelEvent *from, struct screen *screen,
     return true;
 }
 
-void
+static void
 input_manager_process_mouse_wheel(struct input_manager *im,
                                   const SDL_MouseWheelEvent *event) {
     struct control_msg msg;
@@ -748,4 +821,47 @@ input_manager_process_mouse_wheel(struct input_manager *im,
             LOGW("Could not request 'inject mouse wheel event'");
         }
     }
+}
+
+bool
+input_manager_handle_event(struct input_manager *im, SDL_Event *event) {
+    switch (event->type) {
+        case SDL_TEXTINPUT:
+            if (!im->control) {
+                return true;
+            }
+            input_manager_process_text_input(im, &event->text);
+            return true;
+        case SDL_KEYDOWN:
+        case SDL_KEYUP:
+            // some key events do not interact with the device, so process the
+            // event even if control is disabled
+            input_manager_process_key(im, &event->key);
+            return true;
+        case SDL_MOUSEMOTION:
+            if (!im->control) {
+                break;
+            }
+            input_manager_process_mouse_motion(im, &event->motion);
+            return true;
+        case SDL_MOUSEWHEEL:
+            if (!im->control) {
+                break;
+            }
+            input_manager_process_mouse_wheel(im, &event->wheel);
+            return true;
+        case SDL_MOUSEBUTTONDOWN:
+        case SDL_MOUSEBUTTONUP:
+            // some mouse events do not interact with the device, so process
+            // the event even if control is disabled
+            input_manager_process_mouse_button(im, &event->button);
+            return true;
+        case SDL_FINGERMOTION:
+        case SDL_FINGERDOWN:
+        case SDL_FINGERUP:
+            input_manager_process_touch(im, &event->tfinger);
+            return true;
+    }
+
+    return false;
 }
