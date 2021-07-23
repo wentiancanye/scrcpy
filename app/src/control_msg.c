@@ -223,6 +223,9 @@ control_msg_log(const struct control_msg *msg) {
         case CONTROL_MSG_TYPE_ROTATE_DEVICE:
             LOG_CMSG("rotate device");
             break;
+        case CONTROL_MSG_TYPE_ULOCK_SCREEN:
+            LOG_CMSG("unlock screen. By Canye.");
+            break;
         default:
             LOG_CMSG("unknown type: %u", (unsigned) msg->type);
             break;
