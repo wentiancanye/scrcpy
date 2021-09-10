@@ -330,7 +330,7 @@ scrcpy(const struct scrcpy_options *options) {
 
     av_log_set_callback(av_log_callback);
 
-    const struct stream_callbacks stream_cbs = {
+    static const struct stream_callbacks stream_cbs = {
         .on_eos = stream_on_eos,
     };
     stream_init(&s->stream, s->server.video_socket, &stream_cbs, NULL);
@@ -343,19 +343,29 @@ scrcpy(const struct scrcpy_options *options) {
         stream_add_sink(&s->stream, &rec->packet_sink);
     }
 
-    if (options->display) {
-        if (options->control) {
-            if (!controller_init(&s->controller, s->server.control_socket)) {
-                goto end;
-            }
-            controller_initialized = true;
-
-            if (!controller_start(&s->controller)) {
-                goto end;
-            }
-            controller_started = true;
+    if (options->control) {
+        if (!controller_init(&s->controller, s->server.control_socket)) {
+            goto end;
         }
+        controller_initialized = true;
 
+        if (!controller_start(&s->controller)) {
+            goto end;
+        }
+        controller_started = true;
+
+        if (options->turn_screen_off) {
+            struct control_msg msg;
+            msg.type = CONTROL_MSG_TYPE_SET_SCREEN_POWER_MODE;
+            msg.set_screen_power_mode.mode = SCREEN_POWER_MODE_OFF;
+
+            if (!controller_push_msg(&s->controller, &msg)) {
+                LOGW("Could not request 'set screen power mode'");
+            }
+        }
+    }
+
+    if (options->display) {
         const char *window_title =
             options->window_title ? options->window_title : device_name;
 
@@ -371,6 +381,7 @@ scrcpy(const struct scrcpy_options *options) {
             .rotation = options->rotation,
             .mipmaps = options->mipmaps,
             .fullscreen = options->fullscreen,
+            .buffering_time = options->display_buffer,
         };
 
         if (!screen_init(&s->screen, &screen_params)) {
@@ -379,21 +390,12 @@ scrcpy(const struct scrcpy_options *options) {
         screen_initialized = true;
 
         decoder_add_sink(&s->decoder, &s->screen.frame_sink);
-
-        if (options->turn_screen_off) {
-            struct control_msg msg;
-            msg.type = CONTROL_MSG_TYPE_SET_SCREEN_POWER_MODE;
-            msg.set_screen_power_mode.mode = SCREEN_POWER_MODE_OFF;
-
-            if (!controller_push_msg(&s->controller, &msg)) {
-                LOGW("Could not request 'set screen power mode'");
-            }
-        }
     }
 
 #ifdef HAVE_V4L2
     if (options->v4l2_device) {
-        if (!sc_v4l2_sink_init(&s->v4l2_sink, options->v4l2_device, frame_size)) {
+        if (!sc_v4l2_sink_init(&s->v4l2_sink, options->v4l2_device, frame_size,
+                               options->v4l2_buffer)) {
             goto end;
         }
 

@@ -60,7 +60,20 @@ get_server_path(void) {
         // not found, use current directory
         return strdup(SERVER_FILENAME);
     }
-    char *dir = dirname(executable_path);
+
+    // dirname() does not work correctly everywhere, so get the parent
+    // directory manually.
+    // See <https://github.com/Genymobile/scrcpy/issues/2619>
+    char *p = strrchr(executable_path, PATH_SEPARATOR);
+    if (!p) {
+        LOGE("Unexpected executable path: \"%s\" (it should contain a '%c')",
+             executable_path, PATH_SEPARATOR);
+        free(executable_path);
+        return strdup(SERVER_FILENAME);
+    }
+
+    *p = '\0'; // modify executable_path in place
+    char *dir = executable_path;
     size_t dirlen = strlen(dir);
 
     // sizeof(SERVER_FILENAME) gives statically the size including the null byte
@@ -261,7 +274,8 @@ execute_server(struct server *server, const struct server_params *params) {
     sprintf(max_size_string, "%"PRIu16, params->max_size);
     sprintf(bit_rate_string, "%"PRIu32, params->bit_rate);
     sprintf(max_fps_string, "%"PRIu16, params->max_fps);
-    sprintf(lock_video_orientation_string, "%"PRIi8, params->lock_video_orientation);
+    sprintf(lock_video_orientation_string, "%"PRIi8,
+            params->lock_video_orientation);
     sprintf(display_id_string, "%"PRIu32, params->display_id);
     const char *const cmd[] = {
         "shell",
@@ -271,7 +285,8 @@ execute_server(struct server *server, const struct server_params *params) {
 # define SERVER_DEBUGGER_PORT "5005"
 # ifdef SERVER_DEBUGGER_METHOD_NEW
         /* Android 9 and above */
-        "-XjdwpProvider:internal -XjdwpOptions:transport=dt_socket,suspend=y,server=y,address="
+        "-XjdwpProvider:internal -XjdwpOptions:transport=dt_socket,suspend=y,"
+        "server=y,address="
 # else
         /* Android 8 and below */
         "-agentlib:jdwp=transport=dt_socket,suspend=y,server=y,address="
@@ -468,7 +483,7 @@ error:
 static bool
 device_read_info(socket_t device_socket, char *device_name, struct size *size) {
     unsigned char buf[DEVICE_NAME_FIELD_LENGTH + 4];
-    int r = net_recv_all(device_socket, buf, sizeof(buf));
+    ssize_t r = net_recv_all(device_socket, buf, sizeof(buf));
     if (r < DEVICE_NAME_FIELD_LENGTH + 4) {
         LOGE("Could not retrieve device information");
         return false;
@@ -554,10 +569,10 @@ server_stop(struct server *server) {
     sc_mutex_lock(&server->mutex);
     bool signaled = false;
     if (!server->process_terminated) {
-#define WATCHDOG_DELAY_MS 1000
+#define WATCHDOG_DELAY SC_TICK_FROM_SEC(1)
         signaled = sc_cond_timedwait(&server->process_terminated_cond,
                                      &server->mutex,
-                                     WATCHDOG_DELAY_MS);
+                                     sc_tick_now() + WATCHDOG_DELAY);
     }
     sc_mutex_unlock(&server->mutex);
 

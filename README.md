@@ -1,4 +1,4 @@
-# scrcpy (v1.18)
+# scrcpy (v1.19)
 
 [Read in another language](#translations)
 
@@ -88,10 +88,10 @@ process][BUILD_simple]).
 For Windows, for simplicity, a prebuilt archive with all the dependencies
 (including `adb`) is available:
 
- - [`scrcpy-win64-v1.18.zip`][direct-win64]  
-   _(SHA-256: 37212f5087fe6f3e258f1d44fa5c02207496b30e1d7ec442cbcf8358910a5c63)_
+ - [`scrcpy-win64-v1.19.zip`][direct-win64]  
+   _(SHA-256: 383d6483f25ac0092d4bb9fef6c967351ecd50fc248e0c82932db97d6d32f11b)_
 
-[direct-win64]: https://github.com/Genymobile/scrcpy/releases/download/v1.18/scrcpy-win64-v1.18.zip
+[direct-win64]: https://github.com/Genymobile/scrcpy/releases/download/v1.19/scrcpy-win64-v1.19.zip
 
 It is also available in [Chocolatey]:
 
@@ -318,7 +318,25 @@ vlc v4l2:///dev/videoN   # VLC might add some buffering delay
 
 For example, you could capture the video within [OBS].
 
-[OBS]: https://obsproject.com/fr
+[OBS]: https://obsproject.com/
+
+
+#### Buffering
+
+It is possible to add buffering. This increases latency but reduces jitter (see
+#2464).
+
+The option is available for display buffering:
+
+```bash
+scrcpy --display-buffer=50  # add 50 ms buffering for display
+```
+
+and V4L2 sink:
+
+```bash
+scrcpy --v4l2-buffer=500    # add 500 ms buffering for v4l2 sink
+```
 
 
 ### Connection
@@ -875,5 +893,6 @@ This README is available in other languages:
 - [Español (Spanish, `sp`) - v1.17](README.sp.md)
 - [简体中文 (Simplified Chinese, `zh-Hans`) - v1.17](README.zh-Hans.md)
 - [繁體中文 (Traditional Chinese, `zh-Hant`) - v1.15](README.zh-Hant.md)
+- [Turkish (Turkish, `tr`) - v1.18](README.tr.md)
 
 Only this README file is guaranteed to be up-to-date.

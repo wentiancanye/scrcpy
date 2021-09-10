@@ -2,6 +2,7 @@ src = [
     'src/main.c',
     'src/adb.c',
     'src/cli.c',
+    'src/clock.c',
     'src/compat.c',
     'src/control_msg.c',
     'src/controller.c',
@@ -10,6 +11,7 @@ src = [
     'src/event_converter.c',
     'src/file_handler.c',
     'src/fps_counter.c',
+    'src/frame_buffer.c',
     'src/input_manager.c',
     'src/opengl.c',
     'src/receiver.c',
@@ -25,6 +27,7 @@ src = [
     'src/util/process.c',
     'src/util/str_util.c',
     'src/util/thread.c',
+    'src/util/tick.c',
 ]
 
 if host_machine.system() == 'windows'
@@ -164,6 +167,10 @@ if get_option('buildtype') == 'debug'
             'tests/test_cli.c',
             'src/cli.c',
             'src/util/str_util.c',
+        ]],
+        ['test_clock', [
+            'tests/test_clock.c',
+            'src/clock.c',
         ]],
         ['test_control_msg_serialize', [
             'tests/test_control_msg_serialize.c',

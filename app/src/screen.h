@@ -8,6 +8,7 @@
 #include <libavformat/avformat.h>
 
 #include "coords.h"
+#include "fps_counter.h"
 #include "opengl.h"
 #include "trait/frame_sink.h"
 #include "video_buffer.h"
@@ -19,7 +20,7 @@ struct screen {
     bool open; // track the open/close state to assert correct behavior
 #endif
 
-    struct video_buffer vb;
+    struct sc_video_buffer vb;
     struct fps_counter fps_counter;
 
     SDL_Window *window;
@@ -62,6 +63,8 @@ struct screen_params {
     bool mipmaps;
 
     bool fullscreen;
+
+    sc_tick buffering_time;
 };
 
 // initialize screen, create window, renderer and texture (window is hidden)
