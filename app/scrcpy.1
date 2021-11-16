@@ -83,6 +83,14 @@ Start in fullscreen.
 Print this help.
 
 .TP
+.B \-K, \-\-hid\-keyboard
+Simulate a physical keyboard by using HID over AOAv2.
+
+This provides a better experience for IME users, and allows to generate non-ASCII characters, contrary to the default injection method.
+
+It may only work over USB, and is currently only supported on Linux.
+
+.TP
 .B \-\-legacy\-paste
 Inject computer clipboard text as a sequence of key events on Ctrl+v (like MOD+Shift+v).
 
@@ -127,6 +135,10 @@ If the renderer is OpenGL 3.0+ or OpenGL ES 2.0+, then mipmaps are automatically
 Set the TCP port (range) used by the client to listen.
 
 Default is 27183:27199.
+
+.TP
+.B \-\-power\-off\-on\-close
+Turn the device screen off when closing scrcpy.
 
 .TP
 .B \-\-prefer\-text
@@ -355,6 +367,10 @@ Pinch-to-zoom from the center of the screen
 .TP
 .B Drag & drop APK file
 Install APK from computer
+
+.TP
+.B Drag & drop non-APK file
+Push file to device (see \fB\-\-push\-target\fR)
 
 
 .SH Environment variables

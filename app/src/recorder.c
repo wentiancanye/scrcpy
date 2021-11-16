@@ -1,10 +1,12 @@
 #include "recorder.h"
 
 #include <assert.h>
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
 #include <libavutil/time.h>
 
 #include "util/log.h"
-#include "util/str_util.h"
+#include "util/str.h"
 
 /** Downcast packet_sink to recorder */
 #define DOWNCAST(SINK) container_of(SINK, struct recorder, packet_sink)
@@ -24,7 +26,7 @@ find_muxer(const char *name) {
         oformat = av_oformat_next(oformat);
 #endif
         // until null or containing the requested name
-    } while (oformat && !strlist_contains(oformat->name, ',', name));
+    } while (oformat && !sc_str_list_contains(oformat->name, ',', name));
     return oformat;
 }
 
@@ -370,7 +372,7 @@ bool
 recorder_init(struct recorder *recorder,
               const char *filename,
               enum sc_record_format format,
-              struct size declared_frame_size) {
+              struct sc_size declared_frame_size) {
     recorder->filename = strdup(filename);
     if (!recorder->filename) {
         LOGE("Could not strdup filename");
