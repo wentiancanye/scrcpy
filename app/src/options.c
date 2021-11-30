@@ -19,6 +19,8 @@ const struct scrcpy_options scrcpy_options_default = {
         .first = DEFAULT_LOCAL_PORT_RANGE_FIRST,
         .last = DEFAULT_LOCAL_PORT_RANGE_LAST,
     },
+    .tunnel_host = 0,
+    .tunnel_port = 0,
     .shortcut_mods = {
         .data = {SC_MOD_LALT, SC_MOD_LSUPER},
         .count = 2,
@@ -41,7 +43,7 @@ const struct scrcpy_options scrcpy_options_default = {
     .control = true,
     .display = true,
     .turn_screen_off = false,
-    .prefer_text = false,
+    .key_inject_mode = SC_KEY_INJECT_MODE_MIXED,
     .window_borderless = false,
     .mipmaps = true,
     .stay_awake = false,
@@ -51,4 +53,7 @@ const struct scrcpy_options scrcpy_options_default = {
     .forward_all_clicks = false,
     .legacy_paste = false,
     .power_off_on_close = false,
+    .clipboard_autosync = true,
+    .tcpip = false,
+    .tcpip_dst = NULL,
 };

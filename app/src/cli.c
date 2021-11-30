@@ -9,6 +9,7 @@
 
 #include "options.h"
 #include "util/log.h"
+#include "util/net.h"
 #include "util/str.h"
 #include "util/strbuf.h"
 #include "util/term.h"
@@ -46,6 +47,11 @@
 #define OPT_V4L2_SINK              1027
 #define OPT_DISPLAY_BUFFER         1028
 #define OPT_V4L2_BUFFER            1029
+#define OPT_TUNNEL_HOST            1030
+#define OPT_TUNNEL_PORT            1031
+#define OPT_NO_CLIPBOARD_AUTOSYNC  1032
+#define OPT_TCPIP                  1033
+#define OPT_RAW_KEY_EVENTS         1034
 
 struct sc_option {
     char shortopt;
@@ -160,7 +166,14 @@ static const struct sc_option options[] = {
                 "generate non-ASCII characters, contrary to the default "
                 "injection method.\n"
                 "It may only work over USB, and is currently only supported "
-                "on Linux.",
+                "on Linux.\n"
+                "The keyboard layout must be configured (once and for all) on "
+                "the device, via Settings -> System -> Languages and input -> "
+                "Physical keyboard. This settings page can be started "
+                "directly: `adb shell am start -a "
+                "android.settings.HARD_KEYBOARD_SETTINGS`.\n"
+                "However, the option is only available when the HID keyboard "
+                "is enabled (or a physical keyboard is connected).",
     },
     {
         .shortopt = 'h',
@@ -204,6 +217,15 @@ static const struct sc_option options[] = {
                 "other dimension is computed so that the device aspect-ratio "
                 "is preserved.\n"
                 "Default is 0 (unlimited).",
+    },
+    {
+        .longopt_id = OPT_NO_CLIPBOARD_AUTOSYNC,
+        .longopt = "no-clipboard-autosync",
+        .text = "By default, scrcpy automatically synchronizes the computer "
+                "clipboard to the device clipboard before injecting Ctrl+v, "
+                "and the device clipboard to the computer clipboard whenever "
+                "it changes.\n"
+                "This option disables this automatic synchronization."
     },
     {
         .shortopt = 'n',
@@ -260,6 +282,11 @@ static const struct sc_option options[] = {
         .text = "Set the target directory for pushing files to the device by "
                 "drag & drop. It is passed as is to \"adb push\".\n"
                 "Default is \"/sdcard/Download/\".",
+    },
+    {
+        .longopt_id = OPT_RAW_KEY_EVENTS,
+        .longopt = "raw-key-events",
+        .text = "Inject key events for all input keys, and ignore text events."
     },
     {
         .shortopt = 'r',
@@ -330,6 +357,25 @@ static const struct sc_option options[] = {
                 "on exit.\n"
                 "It only shows physical touches (not clicks from scrcpy).",
     },
+    {
+        .longopt_id = OPT_TUNNEL_HOST,
+        .longopt = "tunnel-host",
+        .argdesc = "ip",
+        .text = "Set the IP address of the adb tunnel to reach the scrcpy "
+                "server. This option automatically enables "
+                "--force-adb-forward.\n"
+                "Default is localhost.",
+    },
+    {
+        .longopt_id = OPT_TUNNEL_PORT,
+        .longopt = "tunnel-port",
+        .argdesc = "port",
+        .text = "Set the TCP port of the adb tunnel to reach the scrcpy "
+                "server. This option automatically enables "
+                "--force-adb-forward.\n"
+                "Default is 0 (not forced): the local port used for "
+                "establishing the tunnel will be used.",
+    },
 #ifdef HAVE_V4L2
     {
         .longopt_id = OPT_V4L2_SINK,
@@ -371,6 +417,20 @@ static const struct sc_option options[] = {
         .longopt = "stay-awake",
         .text = "Keep the device on while scrcpy is running, when the device "
                 "is plugged in.",
+    },
+    {
+        .longopt_id = OPT_TCPIP,
+        .longopt = "tcpip",
+        .argdesc = "ip[:port]",
+        .optional_arg = true,
+        .text = "Configure and reconnect the device over TCP/IP.\n"
+                "If a destination address is provided, then scrcpy connects to "
+                "this address before starting. The device must listen on the "
+                "given TCP port (default is 5555).\n"
+                "If no destination address is provided, then scrcpy attempts "
+                "to find the IP address of the current device (typically "
+                "connected over USB), enables TCP/IP mode, then connects to "
+                "this address before starting.",
     },
     {
         .longopt_id = OPT_WINDOW_BORDERLESS,
@@ -563,12 +623,17 @@ sc_getopt_adapter_create_longopts(void) {
     struct option *longopts =
         malloc((ARRAY_LEN(options) + 1) * sizeof(*longopts));
     if (!longopts) {
+        LOG_OOM();
         return NULL;
     }
 
     size_t out_idx = 0;
     for (size_t i = 0; i < ARRAY_LEN(options); ++i) {
         const struct sc_option *in = &options[i];
+
+        // If longopt_id is set, then longopt must be set
+        assert(!in->longopt_id || in->longopt);
+
         if (!in->longopt) {
             // The longopts array must only contain long options
             continue;
@@ -671,12 +736,12 @@ print_option_usage_header(const struct sc_option *opt) {
         }
     }
 
-    fprintf(stderr, "\n    %s\n", buf.s);
+    printf("\n    %s\n", buf.s);
     free(buf.s);
     return;
 
 error:
-    fprintf(stderr, "<ERROR>\n");
+    printf("<ERROR>\n");
 }
 
 static void
@@ -692,11 +757,11 @@ print_option_usage(const struct sc_option *opt, unsigned cols) {
 
     char *text = sc_str_wrap_lines(opt->text, cols, 8);
     if (!text) {
-        fprintf(stderr, "<ERROR>\n");
+        printf("<ERROR>\n");
         return;
     }
 
-    fprintf(stderr, "%s\n", text);
+    printf("%s\n", text);
     free(text);
 }
 
@@ -707,11 +772,11 @@ print_shortcuts_intro(unsigned cols) {
         "(left) Alt or (left) Super, but it can be configured by "
         "--shortcut-mod (see above).", cols, 4);
     if (!intro) {
-        fprintf(stderr, "<ERROR>\n");
+        printf("<ERROR>\n");
         return;
     }
 
-    fprintf(stderr, "%s\n", intro);
+    printf("%s\n", intro);
     free(intro);
 }
 
@@ -721,21 +786,21 @@ print_shortcut(const struct sc_shortcut *shortcut, unsigned cols) {
     assert(shortcut->shortcuts[0]); // At least one shortcut
     assert(shortcut->text);
 
-    fprintf(stderr, "\n");
+    printf("\n");
 
     unsigned i = 0;
     while (shortcut->shortcuts[i]) {
-        fprintf(stderr, "    %s\n", shortcut->shortcuts[i]);
+        printf("    %s\n", shortcut->shortcuts[i]);
         ++i;
     };
 
     char *text = sc_str_wrap_lines(shortcut->text, cols, 8);
     if (!text) {
-        fprintf(stderr, "<ERROR>\n");
+        printf("<ERROR>\n");
         return;
     }
 
-    fprintf(stderr, "%s\n", text);
+    printf("%s\n", text);
     free(text);
 }
 
@@ -759,14 +824,14 @@ scrcpy_print_usage(const char *arg0) {
         }
     }
 
-    fprintf(stderr, "Usage: %s [options]\n\n"
-                    "Options:\n", arg0);
+    printf("Usage: %s [options]\n\n"
+            "Options:\n", arg0);
     for (size_t i = 0; i < ARRAY_LEN(options); ++i) {
         print_option_usage(&options[i], cols);
     }
 
     // Print shortcuts section
-    fprintf(stderr, "\nShortcuts:\n\n");
+    printf("\nShortcuts:\n\n");
     print_shortcuts_intro(cols);
     for (size_t i = 0; i < ARRAY_LEN(shortcuts); ++i) {
         print_shortcut(&shortcuts[i], cols);
@@ -1123,6 +1188,21 @@ parse_record_format(const char *optarg, enum sc_record_format *format) {
     return false;
 }
 
+static bool
+parse_ip(const char *optarg, uint32_t *ipv4) {
+    return net_parse_ipv4(optarg, ipv4);
+}
+
+static bool
+parse_port(const char *optarg, uint16_t *port) {
+    long value;
+    if (!parse_integer_arg(optarg, &value, false, 0, 0xFFFF, "port")) {
+        return false;
+    }
+    *port = (uint16_t) value;
+    return true;
+}
+
 static enum sc_record_format
 guess_record_format(const char *filename) {
     size_t len = strlen(filename);
@@ -1192,6 +1272,16 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
             case OPT_LOCK_VIDEO_ORIENTATION:
                 if (!parse_lock_video_orientation(optarg,
                         &opts->lock_video_orientation)) {
+                    return false;
+                }
+                break;
+            case OPT_TUNNEL_HOST:
+                if (!parse_ip(optarg, &opts->tunnel_host)) {
+                    return false;
+                }
+                break;
+            case OPT_TUNNEL_PORT:
+                if (!parse_port(optarg, &opts->tunnel_port)) {
                     return false;
                 }
                 break;
@@ -1266,7 +1356,18 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 opts->push_target = optarg;
                 break;
             case OPT_PREFER_TEXT:
-                opts->prefer_text = true;
+                if (opts->key_inject_mode != SC_KEY_INJECT_MODE_MIXED) {
+                    LOGE("--prefer-text is incompatible with --raw-key-events");
+                    return false;
+                }
+                opts->key_inject_mode = SC_KEY_INJECT_MODE_TEXT;
+                break;
+            case OPT_RAW_KEY_EVENTS:
+                if (opts->key_inject_mode != SC_KEY_INJECT_MODE_MIXED) {
+                    LOGE("--prefer-text is incompatible with --raw-key-events");
+                    return false;
+                }
+                opts->key_inject_mode = SC_KEY_INJECT_MODE_RAW;
                 break;
             case OPT_ROTATION:
                 if (!parse_rotation(optarg, &opts->rotation)) {
@@ -1313,6 +1414,13 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                     return false;
                 }
                 break;
+            case OPT_NO_CLIPBOARD_AUTOSYNC:
+                opts->clipboard_autosync = false;
+                break;
+            case OPT_TCPIP:
+                opts->tcpip = true;
+                opts->tcpip_dst = optarg;
+                break;
 #ifdef HAVE_V4L2
             case OPT_V4L2_SINK:
                 opts->v4l2_device = optarg;
@@ -1327,6 +1435,20 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 // getopt prints the error message on stderr
                 return false;
         }
+    }
+
+    int index = optind;
+    if (index < argc) {
+        LOGE("Unexpected additional argument: %s", argv[index]);
+        return false;
+    }
+
+    // If a TCP/IP address is provided, then tcpip must be enabled
+    assert(opts->tcpip || !opts->tcpip_dst);
+
+    if (opts->serial && opts->tcpip_dst) {
+        LOGE("Incompatible options: -s/--serial and --tcpip with an argument");
+        return false;
     }
 
 #ifdef HAVE_V4L2
@@ -1354,10 +1476,10 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
     }
 #endif
 
-    int index = optind;
-    if (index < argc) {
-        LOGE("Unexpected additional argument: %s", argv[index]);
-        return false;
+    if ((opts->tunnel_host || opts->tunnel_port) && !opts->force_adb_forward) {
+        LOGI("Tunnel host/port is set, "
+             "--force-adb-forward automatically enabled.");
+        opts->force_adb_forward = true;
     }
 
     if (opts->record_format && !opts->record_filename) {

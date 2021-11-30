@@ -1,5 +1,6 @@
 #include "device_msg.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,7 +24,7 @@ device_msg_deserialize(const unsigned char *buf, size_t len,
             }
             char *text = malloc(clipboard_len + 1);
             if (!text) {
-                LOGW("Could not allocate text for clipboard");
+                LOG_OOM();
                 return -1;
             }
             if (clipboard_len) {
@@ -33,6 +34,11 @@ device_msg_deserialize(const unsigned char *buf, size_t len,
 
             msg->clipboard.text = text;
             return 5 + clipboard_len;
+        }
+        case DEVICE_MSG_TYPE_ACK_CLIPBOARD: {
+            uint64_t sequence = buffer_read64be(&buf[1]);
+            msg->ack_clipboard.sequence = sequence;
+            return 9;
         }
         default:
             LOGW("Unknown device message type: %d", (int) msg->type);

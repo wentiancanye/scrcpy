@@ -90,6 +90,12 @@ This provides a better experience for IME users, and allows to generate non-ASCI
 
 It may only work over USB, and is currently only supported on Linux.
 
+The keyboard layout must be configured (once and for all) on the device, via Settings -> System -> Languages and input -> Physical keyboard. This settings page can be started directly:
+
+    adb shell am start -a android.settings.HARD_KEYBOARD_SETTINGS
+
+However, the option is only available when the HID keyboard is enabled (or a physical keyboard is connected).
+
 .TP
 .B \-\-legacy\-paste
 Inject computer clipboard text as a sequence of key events on Ctrl+v (like MOD+Shift+v).
@@ -113,6 +119,12 @@ Limit the framerate of screen capture (officially supported since Android 10, bu
 Limit both the width and height of the video to \fIvalue\fR. The other dimension is computed so that the device aspect\-ratio is preserved.
 
 Default is 0 (unlimited).
+
+.TP
+.B \-\-no\-clipboard\-autosync
+By default, scrcpy automatically synchronizes the computer clipboard to the device clipboard before injecting Ctrl+v, and the device clipboard to the computer clipboard whenever it changes.
+
+This option disables this automatic synchronization.
 
 .TP
 .B \-n, \-\-no\-control
@@ -152,6 +164,10 @@ but breaks the expected behavior of alpha keys in games (typically WASD).
 Set the target directory for pushing files to the device by drag & drop. It is passed as\-is to "adb push".
 
 Default is "/sdcard/Download/".
+
+.TP
+.B \-\-raw\-key\-events
+Inject key events for all input keys, and ignore text events.
 
 .TP
 .BI "\-r, \-\-record " file
@@ -194,6 +210,14 @@ For example, to use either LCtrl+LAlt or LSuper for scrcpy shortcuts, pass "lctr
 Default is "lalt,lsuper" (left-Alt or left-Super).
 
 .TP
+.BI "\-\-tcpip[=ip[:port]]
+Configure and reconnect the device over TCP/IP.
+
+If a destination address is provided, then scrcpy connects to this address before starting. The device must listen on the given TCP port (default is 5555).
+
+If no destination address is provided, then scrcpy attempts to find the IP address of the current device (typically connected over USB), enables TCP/IP mode, then connects to this address before starting.
+
+.TP
 .B \-S, \-\-turn\-screen\-off
 Turn the device screen off immediately.
 
@@ -202,6 +226,18 @@ Turn the device screen off immediately.
 Enable "show touches" on start, restore the initial value on exit.
 
 It only shows physical touches (not clicks from scrcpy).
+
+.TP
+.BI "\-\-tunnel\-host " ip
+Set the IP address of the adb tunnel to reach the scrcpy server. This option automatically enables --force-adb-forward.
+
+Default is localhost.
+
+.TP
+.BI "\-\-tunnel\-port " port
+Set the TCP port of the adb tunnel to reach the scrcpy server. This option automatically enables --force-adb-forward.
+
+Default is 0 (not forced): the local port used for establishing the tunnel will be used.
 
 .TP
 .BI "\-\-v4l2-sink " /dev/videoN

@@ -29,6 +29,8 @@ struct sc_server_params {
     const char *codec_options;
     const char *encoder_name;
     struct sc_port_range port_range;
+    uint32_t tunnel_host;
+    uint16_t tunnel_port;
     uint16_t max_size;
     uint32_t bit_rate;
     uint16_t max_fps;
@@ -39,6 +41,9 @@ struct sc_server_params {
     bool stay_awake;
     bool force_adb_forward;
     bool power_off_on_close;
+    bool clipboard_autosync;
+    bool tcpip;
+    const char *tcpip_dst;
 };
 
 struct sc_server {

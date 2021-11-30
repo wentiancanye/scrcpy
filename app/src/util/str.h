@@ -103,4 +103,46 @@ sc_str_from_wchars(const wchar_t *s);
 char *
 sc_str_wrap_lines(const char *input, unsigned columns, unsigned indent);
 
+/**
+ * Truncate the data after any of the characters from `endchars`
+ *
+ * An '\0' is always written at the end of the data, even if no newline
+ * character is encountered.
+ *
+ * Return the size of the resulting line.
+ */
+size_t
+sc_str_truncate(char *data, size_t len, const char *endchars);
+
+/**
+ * Find the start of a column in a string
+ *
+ * A string may represent several columns, separated by some "spaces"
+ * (separators). This function aims to find the start of the column number
+ * `col`.
+ *
+ * For example, to find the 4th column (column number 3):
+ *
+ *     //                               here
+ *     //                               v
+ *     const char *s = "abc def    ghi  jk";
+ *     ssize_t index = sc_str_index_of_column(s, 3, " ");
+ *     assert(index == 16); // points to "jk"
+ *
+ * Return -1 if no such column exists.
+ */
+ssize_t
+sc_str_index_of_column(const char *s, unsigned col, const char *seps);
+
+/**
+ * Remove all `\r` at the end of the line
+ *
+ * The line length is provided by `len` (this avoids a call to `strlen()` when
+ * the caller already knows the length).
+ *
+ * Return the new length.
+ */
+size_t
+sc_str_remove_trailing_cr(char *s, size_t len);
+
 #endif

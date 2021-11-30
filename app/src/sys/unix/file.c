@@ -2,9 +2,12 @@
 
 #include <limits.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include "util/log.h"
 
 bool
 sc_file_executable_exists(const char *file) {
@@ -23,7 +26,10 @@ sc_file_executable_exists(const char *file) {
         size_t dir_len = strlen(dir);
         char *fullpath = malloc(dir_len + file_len + 2);
         if (!fullpath)
+        {
+            LOG_OOM();
             continue;
+        }
         memcpy(fullpath, dir, dir_len);
         fullpath[dir_len] = '/';
         memcpy(fullpath + dir_len + 1, file, file_len + 1);

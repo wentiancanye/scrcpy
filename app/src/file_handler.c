@@ -5,6 +5,7 @@
 
 #include "adb.h"
 #include "util/log.h"
+#include "util/process_intr.h"
 
 #define DEFAULT_PUSH_TARGET "/sdcard/Download/"
 
@@ -16,6 +17,7 @@ file_handler_request_destroy(struct file_handler_request *req) {
 bool
 file_handler_init(struct file_handler *file_handler, const char *serial,
                   const char *push_target) {
+    assert(serial);
 
     cbuf_init(&file_handler->queue);
 
@@ -30,23 +32,26 @@ file_handler_init(struct file_handler *file_handler, const char *serial,
         return false;
     }
 
-    if (serial) {
-        file_handler->serial = strdup(serial);
-        if (!file_handler->serial) {
-            LOGW("Could not strdup serial");
-            sc_cond_destroy(&file_handler->event_cond);
-            sc_mutex_destroy(&file_handler->mutex);
-            return false;
-        }
-    } else {
-        file_handler->serial = NULL;
+    ok = sc_intr_init(&file_handler->intr);
+    if (!ok) {
+        sc_cond_destroy(&file_handler->event_cond);
+        sc_mutex_destroy(&file_handler->mutex);
+        return false;
+    }
+
+    file_handler->serial = strdup(serial);
+    if (!file_handler->serial) {
+        LOG_OOM();
+        sc_intr_destroy(&file_handler->intr);
+        sc_cond_destroy(&file_handler->event_cond);
+        sc_mutex_destroy(&file_handler->mutex);
+        return false;
     }
 
     // lazy initialization
     file_handler->initialized = false;
 
     file_handler->stopped = false;
-    file_handler->current_process = SC_PROCESS_NONE;
 
     file_handler->push_target = push_target ? push_target : DEFAULT_PUSH_TARGET;
 
@@ -57,22 +62,13 @@ void
 file_handler_destroy(struct file_handler *file_handler) {
     sc_cond_destroy(&file_handler->event_cond);
     sc_mutex_destroy(&file_handler->mutex);
+    sc_intr_destroy(&file_handler->intr);
     free(file_handler->serial);
 
     struct file_handler_request req;
     while (cbuf_take(&file_handler->queue, &req)) {
         file_handler_request_destroy(&req);
     }
-}
-
-static sc_pid
-install_apk(const char *serial, const char *file) {
-    return adb_install(serial, file);
-}
-
-static sc_pid
-push_file(const char *serial, const char *file, const char *push_target) {
-    return adb_push(serial, file, push_target);
 }
 
 bool
@@ -106,10 +102,16 @@ file_handler_request(struct file_handler *file_handler,
 static int
 run_file_handler(void *data) {
     struct file_handler *file_handler = data;
+    struct sc_intr *intr = &file_handler->intr;
+
+    const char *serial = file_handler->serial;
+    assert(serial);
+
+    const char *push_target = file_handler->push_target;
+    assert(push_target);
 
     for (;;) {
         sc_mutex_lock(&file_handler->mutex);
-        file_handler->current_process = SC_PROCESS_NONE;
         while (!file_handler->stopped && cbuf_is_empty(&file_handler->queue)) {
             sc_cond_wait(&file_handler->event_cond, &file_handler->mutex);
         }
@@ -122,42 +124,25 @@ run_file_handler(void *data) {
         bool non_empty = cbuf_take(&file_handler->queue, &req);
         assert(non_empty);
         (void) non_empty;
-
-        sc_pid pid;
-        if (req.action == ACTION_INSTALL_APK) {
-            LOGI("Installing %s...", req.file);
-            pid = install_apk(file_handler->serial, req.file);
-        } else {
-            LOGI("Pushing %s...", req.file);
-            pid = push_file(file_handler->serial, req.file,
-                            file_handler->push_target);
-        }
-        file_handler->current_process = pid;
         sc_mutex_unlock(&file_handler->mutex);
 
         if (req.action == ACTION_INSTALL_APK) {
-            if (sc_process_check_success(pid, "adb install", false)) {
+            LOGI("Installing %s...", req.file);
+            bool ok = adb_install(intr, serial, req.file, 0);
+            if (ok) {
                 LOGI("%s successfully installed", req.file);
             } else {
                 LOGE("Failed to install %s", req.file);
             }
         } else {
-            if (sc_process_check_success(pid, "adb push", false)) {
-                LOGI("%s successfully pushed to %s", req.file,
-                                                     file_handler->push_target);
+            LOGI("Pushing %s...", req.file);
+            bool ok = adb_push(intr, serial, req.file, push_target, 0);
+            if (ok) {
+                LOGI("%s successfully pushed to %s", req.file, push_target);
             } else {
-                LOGE("Failed to push %s to %s", req.file,
-                                                file_handler->push_target);
+                LOGE("Failed to push %s to %s", req.file, push_target);
             }
         }
-
-        sc_mutex_lock(&file_handler->mutex);
-        // Close the process (it is necessarily already terminated)
-        // Execute this call with mutex locked to avoid race conditions with
-        // file_handler_stop()
-        sc_process_close(file_handler->current_process);
-        file_handler->current_process = SC_PROCESS_NONE;
-        sc_mutex_unlock(&file_handler->mutex);
 
         file_handler_request_destroy(&req);
     }
@@ -183,11 +168,7 @@ file_handler_stop(struct file_handler *file_handler) {
     sc_mutex_lock(&file_handler->mutex);
     file_handler->stopped = true;
     sc_cond_signal(&file_handler->event_cond);
-    if (file_handler->current_process != SC_PROCESS_NONE) {
-        if (!sc_process_terminate(file_handler->current_process)) {
-            LOGW("Could not terminate push/install process");
-        }
-    }
+    sc_intr_interrupt(&file_handler->intr);
     sc_mutex_unlock(&file_handler->mutex);
 }
 

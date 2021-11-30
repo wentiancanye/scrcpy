@@ -78,7 +78,7 @@ static void test_serialize_inject_touch_event(void) {
         .type = CONTROL_MSG_TYPE_INJECT_TOUCH_EVENT,
         .inject_touch_event = {
             .action = AMOTION_EVENT_ACTION_DOWN,
-            .pointer_id = 0x1234567887654321L,
+            .pointer_id = UINT64_C(0x1234567887654321),
             .position = {
                 .point = {
                     .x = 100,
@@ -210,14 +210,18 @@ static void test_serialize_collapse_panels(void) {
 static void test_serialize_get_clipboard(void) {
     struct control_msg msg = {
         .type = CONTROL_MSG_TYPE_GET_CLIPBOARD,
+        .get_clipboard = {
+            .copy_key = GET_CLIPBOARD_COPY_KEY_COPY,
+        },
     };
 
     unsigned char buf[CONTROL_MSG_MAX_SIZE];
     size_t size = control_msg_serialize(&msg, buf);
-    assert(size == 1);
+    assert(size == 2);
 
     const unsigned char expected[] = {
         CONTROL_MSG_TYPE_GET_CLIPBOARD,
+        GET_CLIPBOARD_COPY_KEY_COPY,
     };
     assert(!memcmp(buf, expected, sizeof(expected)));
 }
@@ -226,6 +230,7 @@ static void test_serialize_set_clipboard(void) {
     struct control_msg msg = {
         .type = CONTROL_MSG_TYPE_SET_CLIPBOARD,
         .set_clipboard = {
+            .sequence = UINT64_C(0x0102030405060708),
             .paste = true,
             .text = "hello, world!",
         },
@@ -233,10 +238,11 @@ static void test_serialize_set_clipboard(void) {
 
     unsigned char buf[CONTROL_MSG_MAX_SIZE];
     size_t size = control_msg_serialize(&msg, buf);
-    assert(size == 19);
+    assert(size == 27);
 
     const unsigned char expected[] = {
         CONTROL_MSG_TYPE_SET_CLIPBOARD,
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // sequence
         1, // paste
         0x00, 0x00, 0x00, 0x0d, // text length
         'h', 'e', 'l', 'l', 'o', ',', ' ', 'w', 'o', 'r', 'l', 'd', '!', // text

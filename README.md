@@ -1,11 +1,11 @@
-# scrcpy (v1.20)
+# scrcpy (v1.21)
 
 <img src="data/icon.svg" width="128" height="128" alt="scrcpy" align="right" />
 
 [Read in another language](#translations)
 
 This application provides display and control of Android devices connected via
-USB (or [over TCP/IP](#wireless)). It does not require any _root_ access.
+USB (or [over TCP/IP](#tcpip-wireless)). It does not require any _root_ access.
 It works on _GNU/Linux_, _Windows_ and _macOS_.
 
 ![screenshot](assets/screenshot-debian-600.jpg)
@@ -65,7 +65,7 @@ Build from sources: [BUILD] ([simplified process][BUILD_simple])
 
 ### Linux
 
-On Debian (_testing_ and _sid_ for now) and Ubuntu (20.04):
+On Debian and Ubuntu:
 
 ```
 apt install scrcpy
@@ -101,10 +101,10 @@ process][BUILD_simple]).
 For Windows, for simplicity, a prebuilt archive with all the dependencies
 (including `adb`) is available:
 
- - [`scrcpy-win64-v1.20.zip`][direct-win64]  
-   _(SHA-256: 548532b616288bcaeceff6881ad5e6f0928e5ae2b48c380385f03627401cfdba)_
+ - [`scrcpy-win64-v1.21.zip`][direct-win64]  
+   _(SHA-256: fdab0c1421353b592a9bbcebd6e252675eadccca65cca8105686feaa9c1ded53)_
 
-[direct-win64]: https://github.com/Genymobile/scrcpy/releases/download/v1.20/scrcpy-win64-v1.20.zip
+[direct-win64]: https://github.com/Genymobile/scrcpy/releases/download/v1.21/scrcpy-win64-v1.21.zip
 
 It is also available in [Chocolatey]:
 
@@ -356,10 +356,39 @@ scrcpy --v4l2-buffer=500    # add 500 ms buffering for v4l2 sink
 
 ### Connection
 
-#### Wireless
+#### TCP/IP (wireless)
 
 _Scrcpy_ uses `adb` to communicate with the device, and `adb` can [connect] to a
-device over TCP/IP:
+device over TCP/IP. The device must be connected on the same network as the
+computer.
+
+##### Automatic
+
+An option `--tcpip` allows to configure the connection automatically. There are
+two variants.
+
+If the device (accessible at 192.168.1.1 in this example) already listens on a
+port (typically 5555) for incoming adb connections, then run:
+
+```bash
+scrcpy --tcpip=192.168.1.1       # default port is 5555
+scrcpy --tcpip=192.168.1.1:5555
+```
+
+If adb TCP/IP mode is disabled on the device (or if you don't know the IP
+address), connect the device over USB, then run:
+
+```bash
+scrcpy --tcpip    # without arguments
+```
+
+It will automatically find the device IP address, enable TCP/IP mode, then
+connect to the device before starting.
+
+##### Manual
+
+Alternatively, it is possible to enable the TCP/IP connection manually using
+`adb`:
 
 1. Connect the device to the same Wi-Fi as your computer.
 2. Get your device IP address, in Settings → About phone → Status, or by
@@ -412,21 +441,66 @@ autoadb scrcpy -s '{}'
 
 [AutoAdb]: https://github.com/rom1v/autoadb
 
-#### SSH tunnel
+#### Tunnels
 
 To connect to a remote device, it is possible to connect a local `adb` client to
 a remote `adb` server (provided they use the same version of the _adb_
-protocol):
+protocol).
+
+##### Remote ADB server
+
+To connect to a remote ADB server, make the server listen on all interfaces:
 
 ```bash
-adb kill-server    # kill the local adb server on 5037
-ssh -CN -L5037:localhost:5037 -R27183:localhost:27183 your_remote_computer
+adb kill-server
+adb -a nodaemon server start
 # keep this open
 ```
 
-From another terminal:
+**Warning: all communications between clients and ADB server are unencrypted.**
+
+Suppose that this server is accessible at 192.168.1.2. Then, from another
+terminal, run scrcpy:
 
 ```bash
+export ADB_SERVER_SOCKET=tcp:192.168.1.2:5037
+scrcpy --tunnel-host=192.168.1.2
+```
+
+By default, scrcpy uses the local port used for `adb forward` tunnel
+establishment (typically `27183`, see `--port`). It is also possible to force a
+different tunnel port (it may be useful in more complex situations, when more
+redirections are involved):
+
+```
+scrcpy --tunnel-port=1234
+```
+
+
+##### SSH tunnel
+
+To communicate with a remote ADB server securely, it is preferable to use a SSH
+tunnel.
+
+First, make sure the ADB server is running on the remote computer:
+
+```bash
+adb start-server
+```
+
+Then, establish a SSH tunnel:
+
+```bash
+# local  5038 --> remote  5037
+# local 27183 <-- remote 27183
+ssh -CN -L5038:localhost:5037 -R27183:localhost:27183 your_remote_computer
+# keep this open
+```
+
+From another terminal, run scrcpy:
+
+```bash
+export ADB_SERVER_SOCKET=tcp:localhost:5038
 scrcpy
 ```
 
@@ -434,14 +508,16 @@ To avoid enabling remote port forwarding, you could force a forward connection
 instead (notice the `-L` instead of `-R`):
 
 ```bash
-adb kill-server    # kill the local adb server on 5037
-ssh -CN -L5037:localhost:5037 -L27183:localhost:27183 your_remote_computer
+# local  5038 --> remote  5037
+# local 27183 --> remote 27183
+ssh -CN -L5038:localhost:5037 -L27183:localhost:27183 your_remote_computer
 # keep this open
 ```
 
-From another terminal:
+From another terminal, run scrcpy:
 
 ```bash
+export ADB_SERVER_SOCKET=tcp:localhost:5038
 scrcpy --force-adb-forward
 ```
 
@@ -683,6 +759,9 @@ of <kbd>Ctrl</kbd>+<kbd>v</kbd> and <kbd>MOD</kbd>+<kbd>v</kbd> so that they
 also inject the computer clipboard text as a sequence of key events (the same
 way as <kbd>MOD</kbd>+<kbd>Shift</kbd>+<kbd>v</kbd>).
 
+To disable automatic clipboard synchronization, use
+`--no-clipboard-autosync`.
+
 #### Pinch-to-zoom
 
 To simulate "pinch-to-zoom": <kbd>Ctrl</kbd>+_click-and-move_.
@@ -725,6 +804,15 @@ of the host key mapping. Therefore, if your keyboard layout does not match, it
 must be configured on the Android device, in Settings → System → Languages and
 input → [Physical keyboard].
 
+This settings page can be started directly:
+
+```bash
+adb shell am start -a android.settings.HARD_KEYBOARD_SETTINGS
+```
+
+However, the option is only available when the HID keyboard is enabled (or when
+a physical keyboard is connected).
+
 [Physical keyboard]: https://github.com/Genymobile/scrcpy/pull/2632#issuecomment-923756915
 
 
@@ -746,7 +834,13 @@ scrcpy --prefer-text
 
 (but this will break keyboard behavior in games)
 
-This option has no effect on HID keyboard (all key events are sent as
+On the contrary, you could force to always inject raw key events:
+
+```bash
+scrcpy --raw-key-events
+```
+
+These options have no effect on HID keyboard (all key events are sent as
 scancodes in this mode).
 
 [textevents]: https://blog.rom1v.com/2018/03/introducing-scrcpy/#handle-text-input
@@ -955,7 +1049,7 @@ This README is available in other languages:
 - [한국어 (Korean, `ko`) - v1.11](README.ko.md)
 - [Português Brasileiro (Brazilian Portuguese, `pt-BR`) - v1.19](README.pt-br.md)
 - [Español (Spanish, `sp`) - v1.17](README.sp.md)
-- [简体中文 (Simplified Chinese, `zh-Hans`) - v1.17](README.zh-Hans.md)
+- [简体中文 (Simplified Chinese, `zh-Hans`) - v1.20](README.zh-Hans.md)
 - [繁體中文 (Traditional Chinese, `zh-Hant`) - v1.15](README.zh-Hant.md)
 - [Turkish (Turkish, `tr`) - v1.18](README.tr.md)
 

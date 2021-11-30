@@ -66,6 +66,7 @@ input_manager_init(struct input_manager *im, struct controller *controller,
     im->control = options->control;
     im->forward_all_clicks = options->forward_all_clicks;
     im->legacy_paste = options->legacy_paste;
+    im->clipboard_autosync = options->clipboard_autosync;
 
     const struct sc_shortcut_mods *shortcut_mods = &options->shortcut_mods;
     assert(shortcut_mods->count);
@@ -82,6 +83,8 @@ input_manager_init(struct input_manager *im, struct controller *controller,
     im->last_keycode = SDLK_UNKNOWN;
     im->last_mod = 0;
     im->key_repeat = 0;
+
+    im->next_sequence = 1; // 0 is reserved for SC_SEQUENCE_INVALID
 }
 
 static void
@@ -145,16 +148,6 @@ action_menu(struct controller *controller, int actions) {
     send_keycode(controller, AKEYCODE_MENU, actions, "MENU");
 }
 
-static inline void
-action_copy(struct controller *controller, int actions) {
-    send_keycode(controller, AKEYCODE_COPY, actions, "COPY");
-}
-
-static inline void
-action_cut(struct controller *controller, int actions) {
-    send_keycode(controller, AKEYCODE_CUT, actions, "CUT");
-}
-
 // turn the screen on if it was off, press BACK otherwise
 // If the screen is off, it is turned on only on ACTION_DOWN
 static void
@@ -208,35 +201,50 @@ collapse_panels(struct controller *controller) {
     }
 }
 
-static void
-set_device_clipboard(struct controller *controller, bool paste) {
+static bool
+get_device_clipboard(struct controller *controller,
+                     enum get_clipboard_copy_key copy_key) {
+    struct control_msg msg;
+    msg.type = CONTROL_MSG_TYPE_GET_CLIPBOARD;
+    msg.get_clipboard.copy_key = copy_key;
+
+    if (!controller_push_msg(controller, &msg)) {
+        LOGW("Could not request 'get device clipboard'");
+        return false;
+    }
+
+    return true;
+}
+
+static bool
+set_device_clipboard(struct controller *controller, bool paste,
+                     uint64_t sequence) {
     char *text = SDL_GetClipboardText();
     if (!text) {
         LOGW("Could not get clipboard text: %s", SDL_GetError());
-        return;
-    }
-    if (!*text) {
-        // empty text
-        SDL_free(text);
-        return;
+        return false;
     }
 
     char *text_dup = strdup(text);
     SDL_free(text);
     if (!text_dup) {
         LOGW("Could not strdup input text");
-        return;
+        return false;
     }
 
     struct control_msg msg;
     msg.type = CONTROL_MSG_TYPE_SET_CLIPBOARD;
+    msg.set_clipboard.sequence = sequence;
     msg.set_clipboard.text = text_dup;
     msg.set_clipboard.paste = paste;
 
     if (!controller_push_msg(controller, &msg)) {
         free(text_dup);
         LOGW("Could not request 'set device clipboard'");
+        return false;
     }
+
+    return true;
 }
 
 static void
@@ -456,13 +464,15 @@ input_manager_process_key(struct input_manager *im,
                 }
                 return;
             case SDLK_c:
-                if (control && !shift && !repeat) {
-                    action_copy(controller, action);
+                if (control && !shift && !repeat && down) {
+                    get_device_clipboard(controller,
+                                         GET_CLIPBOARD_COPY_KEY_COPY);
                 }
                 return;
             case SDLK_x:
-                if (control && !shift && !repeat) {
-                    action_cut(controller, action);
+                if (control && !shift && !repeat && down) {
+                    get_device_clipboard(controller,
+                                         GET_CLIPBOARD_COPY_KEY_CUT);
                 }
                 return;
             case SDLK_v:
@@ -471,8 +481,10 @@ input_manager_process_key(struct input_manager *im,
                         // inject the text as input events
                         clipboard_paste(controller);
                     } else {
-                        // store the text in the device clipboard and paste
-                        set_device_clipboard(controller, true);
+                        // store the text in the device clipboard and paste,
+                        // without requesting an acknowledgment
+                        set_device_clipboard(controller, true,
+                                             SC_SEQUENCE_INVALID);
                     }
                 }
                 return;
@@ -527,18 +539,36 @@ input_manager_process_key(struct input_manager *im,
         return;
     }
 
-    if (ctrl && !shift && keycode == SDLK_v && down && !repeat) {
+    uint64_t ack_to_wait = SC_SEQUENCE_INVALID;
+    bool is_ctrl_v = ctrl && !shift && keycode == SDLK_v && down && !repeat;
+    if (im->clipboard_autosync && is_ctrl_v) {
         if (im->legacy_paste) {
             // inject the text as input events
             clipboard_paste(controller);
             return;
         }
+
+        // Request an acknowledgement only if necessary
+        uint64_t sequence = im->kp->async_paste ? im->next_sequence
+                                                : SC_SEQUENCE_INVALID;
+
         // Synchronize the computer clipboard to the device clipboard before
         // sending Ctrl+v, to allow seamless copy-paste.
-        set_device_clipboard(controller, false);
+        bool ok = set_device_clipboard(controller, false, sequence);
+        if (!ok) {
+            LOGW("Clipboard could not be synchronized, Ctrl+v not injected");
+            return;
+        }
+
+        if (im->kp->async_paste) {
+            // The key processor must wait for this ack before injecting Ctrl+v
+            ack_to_wait = sequence;
+            // Increment only when the request succeeded
+            ++im->next_sequence;
+        }
     }
 
-    im->kp->ops->process_key(im->kp, event);
+    im->kp->ops->process_key(im->kp, event, ack_to_wait);
 }
 
 static void

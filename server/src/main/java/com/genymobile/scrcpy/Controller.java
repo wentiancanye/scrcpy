@@ -21,6 +21,7 @@ public class Controller {
     private final Device device;
     private final DesktopConnection connection;
     private final DeviceMessageSender sender;
+    private final boolean clipboardAutosync;
 
     private final KeyCharacterMap charMap = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD);
 
@@ -31,9 +32,10 @@ public class Controller {
 
     private boolean keepPowerModeOff;
 
-    public Controller(Device device, DesktopConnection connection) {
+    public Controller(Device device, DesktopConnection connection, boolean clipboardAutosync) {
         this.device = device;
         this.connection = connection;
+        this.clipboardAutosync = clipboardAutosync;
         initPointers();
         sender = new DeviceMessageSender(connection);
     }
@@ -55,7 +57,7 @@ public class Controller {
     public void control() throws IOException {
         // on start, power on the device
         if (!Device.isScreenOn()) {
-            device.pressReleaseKeycode(KeyEvent.KEYCODE_POWER);
+            device.pressReleaseKeycode(KeyEvent.KEYCODE_POWER, Device.INJECT_MODE_ASYNC);
 
             // dirty hack
             // After POWER is injected, the device is powered on asynchronously.
@@ -114,13 +116,10 @@ public class Controller {
                 Device.collapsePanels();
                 break;
             case ControlMessage.TYPE_GET_CLIPBOARD:
-                String clipboardText = Device.getClipboardText();
-                if (clipboardText != null) {
-                    sender.pushClipboardText(clipboardText);
-                }
+                getClipboard(msg.getCopyKey());
                 break;
             case ControlMessage.TYPE_SET_CLIPBOARD:
-                setClipboard(msg.getText(), msg.getPaste());
+                setClipboard(msg.getText(), msg.getPaste(), msg.getSequence());
                 break;
             case ControlMessage.TYPE_SET_SCREEN_POWER_MODE:
                 if (device.supportsInputEvents()) {
@@ -147,7 +146,7 @@ public class Controller {
         if (keepPowerModeOff && action == KeyEvent.ACTION_UP && (keycode == KeyEvent.KEYCODE_POWER || keycode == KeyEvent.KEYCODE_WAKEUP)) {
             schedulePowerModeOff();
         }
-        return device.injectKeyEvent(action, keycode, repeat, metaState);
+        return device.injectKeyEvent(action, keycode, repeat, metaState, Device.INJECT_MODE_ASYNC);
     }
 
     private boolean injectChar(char c) {
@@ -158,7 +157,7 @@ public class Controller {
             return false;
         }
         for (KeyEvent event : events) {
-            if (!device.injectEvent(event)) {
+            if (!device.injectEvent(event, Device.INJECT_MODE_ASYNC)) {
                 return false;
             }
         }
@@ -222,7 +221,7 @@ public class Controller {
         MotionEvent event = MotionEvent
                 .obtain(lastTouchDown, now, action, pointerCount, pointerProperties, pointerCoords, 0, buttons, 1f, 1f, DEFAULT_DEVICE_ID, 0, source,
                         0);
-        return device.injectEvent(event);
+        return device.injectEvent(event, Device.INJECT_MODE_ASYNC);
     }
 
     private boolean injectScroll(Position position, int hScroll, int vScroll) {
@@ -245,7 +244,7 @@ public class Controller {
         MotionEvent event = MotionEvent
                 .obtain(lastTouchDown, now, MotionEvent.ACTION_SCROLL, 1, pointerProperties, pointerCoords, 0, 0, 1f, 1f, DEFAULT_DEVICE_ID, 0,
                         InputDevice.SOURCE_MOUSE, 0);
-        return device.injectEvent(event);
+        return device.injectEvent(event, Device.INJECT_MODE_ASYNC);
     }
 
     /**
@@ -263,7 +262,7 @@ public class Controller {
 
     private boolean pressBackOrTurnScreenOn(int action) {
         if (Device.isScreenOn()) {
-            return device.injectKeyEvent(action, KeyEvent.KEYCODE_BACK, 0, 0);
+            return device.injectKeyEvent(action, KeyEvent.KEYCODE_BACK, 0, 0, Device.INJECT_MODE_ASYNC);
         }
 
         // Screen is off
@@ -276,10 +275,29 @@ public class Controller {
         if (keepPowerModeOff) {
             schedulePowerModeOff();
         }
-        return device.pressReleaseKeycode(KeyEvent.KEYCODE_POWER);
+        return device.pressReleaseKeycode(KeyEvent.KEYCODE_POWER, Device.INJECT_MODE_ASYNC);
     }
 
-    private boolean setClipboard(String text, boolean paste) {
+    private void getClipboard(int copyKey) {
+        // On Android >= 7, press the COPY or CUT key if requested
+        if (copyKey != ControlMessage.COPY_KEY_NONE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && device.supportsInputEvents()) {
+            int key = copyKey == ControlMessage.COPY_KEY_COPY ? KeyEvent.KEYCODE_COPY : KeyEvent.KEYCODE_CUT;
+            // Wait until the event is finished, to ensure that the clipboard text we read just after is the correct one
+            device.pressReleaseKeycode(key, Device.INJECT_MODE_WAIT_FOR_FINISH);
+        }
+
+        // If clipboard autosync is enabled, then the device clipboard is synchronized to the computer clipboard whenever it changes, in
+        // particular when COPY or CUT are injected, so it should not be synchronized twice. On Android < 7, do not synchronize at all rather than
+        // copying an old clipboard content.
+        if (!clipboardAutosync) {
+            String clipboardText = Device.getClipboardText();
+            if (clipboardText != null) {
+                sender.pushClipboardText(clipboardText);
+            }
+        }
+    }
+
+    private boolean setClipboard(String text, boolean paste, long sequence) {
         boolean ok = device.setClipboardText(text);
         if (ok) {
             Ln.i("Device clipboard set");
@@ -287,7 +305,12 @@ public class Controller {
 
         // On Android >= 7, also press the PASTE key if requested
         if (paste && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && device.supportsInputEvents()) {
-            device.pressReleaseKeycode(KeyEvent.KEYCODE_PASTE);
+            device.pressReleaseKeycode(KeyEvent.KEYCODE_PASTE, Device.INJECT_MODE_ASYNC);
+        }
+
+        if (sequence != ControlMessage.SEQUENCE_INVALID) {
+            // Acknowledgement requested
+            sender.pushAckClipboard(sequence);
         }
 
         return ok;

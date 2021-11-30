@@ -27,6 +27,7 @@
 #include "screen.h"
 #include "server.h"
 #include "stream.h"
+#include "util/acksync.h"
 #include "util/log.h"
 #include "util/net.h"
 #ifdef HAVE_V4L2
@@ -46,6 +47,8 @@ struct scrcpy {
     struct file_handler file_handler;
 #ifdef HAVE_AOA_HID
     struct sc_aoa aoa;
+    // sequence/ack helper to synchronize clipboard and Ctrl+v via HID
+    struct sc_acksync acksync;
 #endif
     union {
         struct sc_keyboard_inject keyboard_inject;
@@ -268,7 +271,7 @@ av_log_callback(void *avcl, int level, const char *fmt, va_list vl) {
     size_t fmt_len = strlen(fmt);
     char *local_fmt = malloc(fmt_len + 10);
     if (!local_fmt) {
-        LOGC("Could not allocate string");
+        LOG_OOM();
         return;
     }
     memcpy(local_fmt, "[FFmpeg] ", 9); // do not write the final '\0'
@@ -340,11 +343,15 @@ scrcpy(struct scrcpy_options *options) {
     bool controller_started = false;
     bool screen_initialized = false;
 
+    struct sc_acksync *acksync = NULL;
+
     struct sc_server_params params = {
         .serial = options->serial,
         .log_level = options->log_level,
         .crop = options->crop,
         .port_range = options->port_range,
+        .tunnel_host = options->tunnel_host,
+        .tunnel_port = options->tunnel_port,
         .max_size = options->max_size,
         .bit_rate = options->bit_rate,
         .max_fps = options->max_fps,
@@ -357,6 +364,9 @@ scrcpy(struct scrcpy_options *options) {
         .encoder_name = options->encoder_name,
         .force_adb_forward = options->force_adb_forward,
         .power_off_on_close = options->power_off_on_close,
+        .clipboard_autosync = options->clipboard_autosync,
+        .tcpip = options->tcpip,
+        .tcpip_dst = options->tcpip_dst,
     };
 
     static const struct sc_server_callbacks cbs = {
@@ -394,8 +404,11 @@ scrcpy(struct scrcpy_options *options) {
     // It is necessarily initialized here, since the device is connected
     struct sc_server_info *info = &s->server.info;
 
+    const char *serial = s->server.params.serial;
+    assert(serial);
+
     if (options->display && options->control) {
-        if (!file_handler_init(&s->file_handler, options->serial,
+        if (!file_handler_init(&s->file_handler, serial,
                                options->push_target)) {
             goto end;
         }
@@ -440,7 +453,18 @@ scrcpy(struct scrcpy_options *options) {
     }
 
     if (options->control) {
-        if (!controller_init(&s->controller, s->server.control_socket)) {
+#ifdef HAVE_AOA_HID
+        if (options->keyboard_input_mode == SC_KEYBOARD_INPUT_MODE_HID) {
+            bool ok = sc_acksync_init(&s->acksync);
+            if (!ok) {
+                goto end;
+            }
+
+            acksync = &s->acksync;
+        }
+#endif
+        if (!controller_init(&s->controller, s->server.control_socket,
+                             acksync)) {
             goto end;
         }
         controller_initialized = true;
@@ -516,21 +540,7 @@ scrcpy(struct scrcpy_options *options) {
 #ifdef HAVE_AOA_HID
             bool aoa_hid_ok = false;
 
-            char *serialno = NULL;
-
-            const char *serial = options->serial;
-            if (!serial) {
-                serialno = adb_get_serialno();
-                if (!serialno) {
-                    LOGE("Could not get device serial");
-                    goto aoa_hid_end;
-                }
-                serial = serialno;
-                LOGI("Device serial: %s", serial);
-            }
-
-            bool ok = sc_aoa_init(&s->aoa, serial);
-            free(serialno);
+            bool ok = sc_aoa_init(&s->aoa, serial, acksync);
             if (!ok) {
                 goto aoa_hid_end;
             }
@@ -594,6 +604,9 @@ end:
     if (aoa_hid_initialized) {
         sc_hid_keyboard_destroy(&s->keyboard_hid);
         sc_aoa_stop(&s->aoa);
+    }
+    if (acksync) {
+        sc_acksync_destroy(acksync);
     }
 #endif
     if (controller_started) {

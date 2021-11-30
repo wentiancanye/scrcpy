@@ -24,6 +24,7 @@ struct input_manager {
     bool control;
     bool forward_all_clicks;
     bool legacy_paste;
+    bool clipboard_autosync;
 
     struct {
         unsigned data[SC_MAX_SHORTCUT_MODS];
@@ -38,6 +39,8 @@ struct input_manager {
     unsigned key_repeat;
     SDL_Keycode last_keycode;
     uint16_t last_mod;
+
+    uint64_t next_sequence; // used for request acknowledgements
 };
 
 void

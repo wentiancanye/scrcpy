@@ -19,6 +19,12 @@ public final class ControlMessage {
     public static final int TYPE_ROTATE_DEVICE = 11;
     public static final int TYPE_UNLOCK_SCREEN = 12;
 
+    public static final long SEQUENCE_INVALID = 0;
+
+    public static final int COPY_KEY_NONE = 0;
+    public static final int COPY_KEY_COPY = 1;
+    public static final int COPY_KEY_CUT = 2;
+
     private int type;
     private String text;
     private int metaState; // KeyEvent.META_*
@@ -30,8 +36,10 @@ public final class ControlMessage {
     private Position position;
     private int hScroll;
     private int vScroll;
+    private int copyKey;
     private boolean paste;
     private int repeat;
+    private long sequence;
 
     private ControlMessage() {
     }
@@ -80,9 +88,17 @@ public final class ControlMessage {
         return msg;
     }
 
-    public static ControlMessage createSetClipboard(String text, boolean paste) {
+    public static ControlMessage createGetClipboard(int copyKey) {
+        ControlMessage msg = new ControlMessage();
+        msg.type = TYPE_GET_CLIPBOARD;
+        msg.copyKey = copyKey;
+        return msg;
+    }
+
+    public static ControlMessage createSetClipboard(long sequence, String text, boolean paste) {
         ControlMessage msg = new ControlMessage();
         msg.type = TYPE_SET_CLIPBOARD;
+        msg.sequence = sequence;
         msg.text = text;
         msg.paste = paste;
         return msg;
@@ -148,11 +164,19 @@ public final class ControlMessage {
         return vScroll;
     }
 
+    public int getCopyKey() {
+        return copyKey;
+    }
+
     public boolean getPaste() {
         return paste;
     }
 
     public int getRepeat() {
         return repeat;
+    }
+
+    public long getSequence() {
+        return sequence;
     }
 }

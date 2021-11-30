@@ -5,12 +5,14 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-#include "util/strbuf.h"
 
 #ifdef _WIN32
 # include <windows.h>
 # include <tchar.h>
 #endif
+
+#include "log.h"
+#include "strbuf.h"
 
 size_t
 sc_strncpy(char *dest, const char *src, size_t n) {
@@ -51,6 +53,7 @@ sc_str_quote(const char *src) {
     size_t len = strlen(src);
     char *quoted = malloc(len + 3);
     if (!quoted) {
+        LOG_OOM();
         return NULL;
     }
     memcpy(&quoted[1], src, len);
@@ -188,6 +191,7 @@ sc_str_to_wchars(const char *utf8) {
 
     wchar_t *wide = malloc(len * sizeof(wchar_t));
     if (!wide) {
+        LOG_OOM();
         return NULL;
     }
 
@@ -204,6 +208,7 @@ sc_str_from_wchars(const wchar_t *ws) {
 
     char *utf8 = malloc(len);
     if (!utf8) {
+        LOG_OOM();
         return NULL;
     }
 
@@ -290,4 +295,49 @@ sc_str_wrap_lines(const char *input, unsigned columns, unsigned indent) {
 error:
     free(buf.s);
     return NULL;
+}
+
+size_t
+sc_str_truncate(char *data, size_t len, const char *endchars) {
+    data[len - 1] = '\0';
+    size_t idx = strcspn(data, endchars);
+    data[idx] = '\0';
+    return idx;
+}
+
+ssize_t
+sc_str_index_of_column(const char *s, unsigned col, const char *seps) {
+    size_t colidx = 0;
+
+    size_t idx = 0;
+    while (s[idx] != '\0' && colidx != col) {
+        size_t r = strcspn(&s[idx], seps);
+        idx += r;
+
+        if (s[idx] == '\0') {
+            // Not found
+            return -1;
+        }
+
+        size_t consecutive_seps = strspn(&s[idx], seps);
+        assert(consecutive_seps); // At least one
+        idx += consecutive_seps;
+
+        if (s[idx] != '\0') {
+            ++colidx;
+        }
+    }
+
+    return col == colidx ? (ssize_t) idx : -1;
+}
+
+size_t
+sc_str_remove_trailing_cr(char *s, size_t len) {
+    while (len) {
+        if (s[len - 1] != '\r') {
+            break;
+        }
+        s[--len] = '\0';
+    }
+    return len;
 }

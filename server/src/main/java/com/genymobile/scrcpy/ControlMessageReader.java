@@ -13,11 +13,12 @@ public class ControlMessageReader {
     static final int INJECT_SCROLL_EVENT_PAYLOAD_LENGTH = 20;
     static final int BACK_OR_SCREEN_ON_LENGTH = 1;
     static final int SET_SCREEN_POWER_MODE_PAYLOAD_LENGTH = 1;
-    static final int SET_CLIPBOARD_FIXED_PAYLOAD_LENGTH = 1;
+    static final int GET_CLIPBOARD_LENGTH = 1;
+    static final int SET_CLIPBOARD_FIXED_PAYLOAD_LENGTH = 9;
 
     private static final int MESSAGE_MAX_SIZE = 1 << 18; // 256k
 
-    public static final int CLIPBOARD_TEXT_MAX_LENGTH = MESSAGE_MAX_SIZE - 6; // type: 1 byte; paste flag: 1 byte; length: 4 bytes
+    public static final int CLIPBOARD_TEXT_MAX_LENGTH = MESSAGE_MAX_SIZE - 14; // type: 1 byte; sequence: 8 bytes; paste flag: 1 byte; length: 4 bytes
     public static final int INJECT_TEXT_MAX_LENGTH = 300;
 
     private final byte[] rawBuffer = new byte[MESSAGE_MAX_SIZE];
@@ -70,6 +71,9 @@ public class ControlMessageReader {
             case ControlMessage.TYPE_BACK_OR_SCREEN_ON:
                 msg = parseBackOrScreenOnEvent();
                 break;
+            case ControlMessage.TYPE_GET_CLIPBOARD:
+                msg = parseGetClipboard();
+                break;
             case ControlMessage.TYPE_SET_CLIPBOARD:
                 msg = parseSetClipboard();
                 break;
@@ -79,7 +83,6 @@ public class ControlMessageReader {
             case ControlMessage.TYPE_EXPAND_NOTIFICATION_PANEL:
             case ControlMessage.TYPE_EXPAND_SETTINGS_PANEL:
             case ControlMessage.TYPE_COLLAPSE_PANELS:
-            case ControlMessage.TYPE_GET_CLIPBOARD:
             case ControlMessage.TYPE_UNLOCK_SCREEN:
             case ControlMessage.TYPE_ROTATE_DEVICE:
                 msg = ControlMessage.createEmpty(type);
@@ -163,16 +166,25 @@ public class ControlMessageReader {
         return ControlMessage.createBackOrScreenOn(action);
     }
 
+    private ControlMessage parseGetClipboard() {
+        if (buffer.remaining() < GET_CLIPBOARD_LENGTH) {
+            return null;
+        }
+        int copyKey = toUnsigned(buffer.get());
+        return ControlMessage.createGetClipboard(copyKey);
+    }
+
     private ControlMessage parseSetClipboard() {
         if (buffer.remaining() < SET_CLIPBOARD_FIXED_PAYLOAD_LENGTH) {
             return null;
         }
+        long sequence = buffer.getLong();
         boolean paste = buffer.get() != 0;
         String text = parseString();
         if (text == null) {
             return null;
         }
-        return ControlMessage.createSetClipboard(text, paste);
+        return ControlMessage.createSetClipboard(sequence, text, paste);
     }
 
     private ControlMessage parseSetScreenPowerMode() {
