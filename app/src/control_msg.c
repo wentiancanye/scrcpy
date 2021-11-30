@@ -140,7 +140,6 @@ control_msg_serialize(const struct control_msg *msg, unsigned char *buf) {
         case CONTROL_MSG_TYPE_EXPAND_NOTIFICATION_PANEL:
         case CONTROL_MSG_TYPE_EXPAND_SETTINGS_PANEL:
         case CONTROL_MSG_TYPE_COLLAPSE_PANELS:
-        case CONTROL_MSG_TYPE_GET_CLIPBOARD:
         case CONTROL_MSG_TYPE_ULOCK_SCREEN:
         case CONTROL_MSG_TYPE_ROTATE_DEVICE:
             // no additional data
