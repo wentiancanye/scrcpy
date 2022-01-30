@@ -230,7 +230,7 @@ sc_control_msg_log(const struct sc_control_msg *msg) {
         case SC_CONTROL_MSG_TYPE_ROTATE_DEVICE:
             LOG_CMSG("rotate device");
             break;
-        case CONTROL_MSG_TYPE_ULOCK_SCREEN:
+        case SC_CONTROL_MSG_TYPE_ULOCK_SCREEN:
             LOG_CMSG("unlock screen. By Canye.");
             break;
         default:
