@@ -513,7 +513,7 @@ sc_input_manager_process_key(struct sc_input_manager *im,
                 }
                 return;
             case SDLK_j:
-                if (control && !shift && !repeat && down) {
+                if (controller && !shift && !repeat && down) {
                     LOGI("Request unlock screen event");
                     unlock_screen(controller);
                 }
