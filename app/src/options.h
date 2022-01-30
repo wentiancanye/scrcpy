@@ -38,6 +38,11 @@ enum sc_keyboard_input_mode {
     SC_KEYBOARD_INPUT_MODE_HID,
 };
 
+enum sc_mouse_input_mode {
+    SC_MOUSE_INPUT_MODE_INJECT,
+    SC_MOUSE_INPUT_MODE_HID,
+};
+
 enum sc_key_inject_mode {
     // Inject special keys, letters and space as key events.
     // Inject numbers and punctuation as text events.
@@ -55,12 +60,12 @@ enum sc_key_inject_mode {
 #define SC_MAX_SHORTCUT_MODS 8
 
 enum sc_shortcut_mod {
-    SC_MOD_LCTRL = 1 << 0,
-    SC_MOD_RCTRL = 1 << 1,
-    SC_MOD_LALT = 1 << 2,
-    SC_MOD_RALT = 1 << 3,
-    SC_MOD_LSUPER = 1 << 4,
-    SC_MOD_RSUPER = 1 << 5,
+    SC_SHORTCUT_MOD_LCTRL = 1 << 0,
+    SC_SHORTCUT_MOD_RCTRL = 1 << 1,
+    SC_SHORTCUT_MOD_LALT = 1 << 2,
+    SC_SHORTCUT_MOD_RALT = 1 << 3,
+    SC_SHORTCUT_MOD_LSUPER = 1 << 4,
+    SC_SHORTCUT_MOD_RSUPER = 1 << 5,
 };
 
 struct sc_shortcut_mods {
@@ -90,6 +95,7 @@ struct scrcpy_options {
     enum sc_log_level log_level;
     enum sc_record_format record_format;
     enum sc_keyboard_input_mode keyboard_input_mode;
+    enum sc_mouse_input_mode mouse_input_mode;
     struct sc_port_range port_range;
     uint32_t tunnel_host;
     uint16_t tunnel_port;
@@ -106,6 +112,9 @@ struct scrcpy_options {
     uint32_t display_id;
     sc_tick display_buffer;
     sc_tick v4l2_buffer;
+#ifdef HAVE_USB
+    bool otg;
+#endif
     bool show_touches;
     bool fullscreen;
     bool always_on_top;
@@ -123,6 +132,7 @@ struct scrcpy_options {
     bool legacy_paste;
     bool power_off_on_close;
     bool clipboard_autosync;
+    bool downsize_on_error;
     bool tcpip;
     const char *tcpip_dst;
 };

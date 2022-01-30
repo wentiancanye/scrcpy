@@ -188,7 +188,6 @@ execute_server(struct sc_server *server,
         } \
         cmd[count++] = p; \
     }
-#define STRBOOL(v) (v ? "true" : "false")
 
     ADD_PARAM("log_level=%s", log_level_to_server_string(params->log_level));
     ADD_PARAM("bit_rate=%" PRIu32, params->bit_rate);
@@ -204,23 +203,23 @@ execute_server(struct sc_server *server,
                   params->lock_video_orientation);
     }
     if (server->tunnel.forward) {
-        ADD_PARAM("tunnel_forward=%s", STRBOOL(server->tunnel.forward));
+        ADD_PARAM("tunnel_forward=true");
     }
     if (params->crop) {
         ADD_PARAM("crop=%s", params->crop);
     }
     if (!params->control) {
         // By default, control is true
-        ADD_PARAM("control=%s", STRBOOL(params->control));
+        ADD_PARAM("control=false");
     }
     if (params->display_id) {
         ADD_PARAM("display_id=%" PRIu32, params->display_id);
     }
     if (params->show_touches) {
-        ADD_PARAM("show_touches=%s", STRBOOL(params->show_touches));
+        ADD_PARAM("show_touches=true");
     }
     if (params->stay_awake) {
-        ADD_PARAM("stay_awake=%s", STRBOOL(params->stay_awake));
+        ADD_PARAM("stay_awake=true");
     }
     if (params->codec_options) {
         ADD_PARAM("codec_options=%s", params->codec_options);
@@ -229,11 +228,15 @@ execute_server(struct sc_server *server,
         ADD_PARAM("encoder_name=%s", params->encoder_name);
     }
     if (params->power_off_on_close) {
-        ADD_PARAM("power_off_on_close=%s", STRBOOL(params->power_off_on_close));
+        ADD_PARAM("power_off_on_close=true");
     }
     if (!params->clipboard_autosync) {
-        // By defaut, clipboard_autosync is true
-        ADD_PARAM("clipboard_autosync=%s", STRBOOL(params->clipboard_autosync));
+        // By default, clipboard_autosync is true
+        ADD_PARAM("clipboard_autosync=false");
+    }
+    if (!params->downsize_on_error) {
+        // By default, downsize_on_error is true
+        ADD_PARAM("downsize_on_error=false");
     }
 
 #undef ADD_PARAM
@@ -388,6 +391,7 @@ sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
     assert(tunnel->enabled);
 
     const char *serial = server->params.serial;
+    bool control = server->params.control;
 
     sc_socket video_socket = SC_SOCKET_NONE;
     sc_socket control_socket = SC_SOCKET_NONE;
@@ -397,9 +401,12 @@ sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
             goto fail;
         }
 
-        control_socket = net_accept_intr(&server->intr, tunnel->server_socket);
-        if (control_socket == SC_SOCKET_NONE) {
-            goto fail;
+        if (control) {
+            control_socket =
+                net_accept_intr(&server->intr, tunnel->server_socket);
+            if (control_socket == SC_SOCKET_NONE) {
+                goto fail;
+            }
         }
     } else {
         uint32_t tunnel_host = server->params.tunnel_host;
@@ -420,15 +427,18 @@ sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
             goto fail;
         }
 
-        // we know that the device is listening, we don't need several attempts
-        control_socket = net_socket();
-        if (control_socket == SC_SOCKET_NONE) {
-            goto fail;
-        }
-        bool ok = net_connect_intr(&server->intr, control_socket, tunnel_host,
-                                   tunnel_port);
-        if (!ok) {
-            goto fail;
+        if (control) {
+            // we know that the device is listening, we don't need several
+            // attempts
+            control_socket = net_socket();
+            if (control_socket == SC_SOCKET_NONE) {
+                goto fail;
+            }
+            bool ok = net_connect_intr(&server->intr, control_socket,
+                                       tunnel_host, tunnel_port);
+            if (!ok) {
+                goto fail;
+            }
         }
     }
 
@@ -442,7 +452,7 @@ sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
     }
 
     assert(video_socket != SC_SOCKET_NONE);
-    assert(control_socket != SC_SOCKET_NONE);
+    assert(!control || control_socket != SC_SOCKET_NONE);
 
     server->video_socket = video_socket;
     server->control_socket = control_socket;
@@ -756,6 +766,15 @@ run_server(void *data) {
     }
     sc_mutex_unlock(&server->mutex);
 
+    // Interrupt sockets to wake up socket blocking calls on the server
+    assert(server->video_socket != SC_SOCKET_NONE);
+    net_interrupt(server->video_socket);
+
+    if (server->control_socket != SC_SOCKET_NONE) {
+        // There is no control_socket if --no-control is set
+        net_interrupt(server->control_socket);
+    }
+
     // Give some delay for the server to terminate properly
 #define WATCHDOG_DELAY SC_TICK_FROM_SEC(1)
     sc_tick deadline = sc_tick_now() + WATCHDOG_DELAY;
@@ -786,7 +805,8 @@ error_connection_failed:
 
 bool
 sc_server_start(struct sc_server *server) {
-    bool ok = sc_thread_create(&server->thread, run_server, "server", server);
+    bool ok =
+        sc_thread_create(&server->thread, run_server, "scrcpy-server", server);
     if (!ok) {
         LOGE("Could not create server thread");
         return false;
@@ -808,6 +828,13 @@ sc_server_stop(struct sc_server *server) {
 
 void
 sc_server_destroy(struct sc_server *server) {
+    if (server->video_socket != SC_SOCKET_NONE) {
+        net_close(server->video_socket);
+    }
+    if (server->control_socket != SC_SOCKET_NONE) {
+        net_close(server->control_socket);
+    }
+
     sc_server_params_destroy(&server->params);
     sc_intr_destroy(&server->intr);
     sc_cond_destroy(&server->cond_stopped);

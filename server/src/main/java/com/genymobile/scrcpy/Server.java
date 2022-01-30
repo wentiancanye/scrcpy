@@ -1,7 +1,6 @@
 package com.genymobile.scrcpy;
 
 import android.graphics.Rect;
-import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.os.BatteryManager;
 import android.os.Build;
@@ -20,6 +19,7 @@ public final class Server {
     private static void initAndCleanUp(Options options) {
         boolean mustDisableShowTouchesOnCleanUp = false;
         int restoreStayOn = -1;
+        boolean restoreNormalPowerMode = options.getControl(); // only restore power mode if control is enabled
         if (options.getShowTouches() || options.getStayAwake()) {
             Settings settings = Device.getSettings();
             if (options.getShowTouches()) {
@@ -52,7 +52,8 @@ public final class Server {
         }
 
         try {
-            CleanUp.configure(options.getDisplayId(), restoreStayOn, mustDisableShowTouchesOnCleanUp, true, options.getPowerOffScreenOnClose());
+            CleanUp.configure(options.getDisplayId(), restoreStayOn, mustDisableShowTouchesOnCleanUp, restoreNormalPowerMode,
+                    options.getPowerOffScreenOnClose());
         } catch (IOException e) {
             Ln.e("Could not configure cleanup", e);
         }
@@ -66,14 +67,20 @@ public final class Server {
         Thread initThread = startInitThread(options);
 
         boolean tunnelForward = options.isTunnelForward();
+        boolean control = options.getControl();
+        boolean sendDummyByte = options.getSendDummyByte();
 
-        try (DesktopConnection connection = DesktopConnection.open(device, tunnelForward)) {
+        try (DesktopConnection connection = DesktopConnection.open(tunnelForward, control, sendDummyByte)) {
+            if (options.getSendDeviceMeta()) {
+                Size videoSize = device.getScreenInfo().getVideoSize();
+                connection.sendDeviceMeta(Device.getDeviceName(), videoSize.getWidth(), videoSize.getHeight());
+            }
             ScreenEncoder screenEncoder = new ScreenEncoder(options.getSendFrameMeta(), options.getBitRate(), options.getMaxFps(), codecOptions,
-                    options.getEncoderName());
+                    options.getEncoderName(), options.getDownsizeOnError());
 
             Thread controllerThread = null;
             Thread deviceMessageSenderThread = null;
-            if (options.getControl()) {
+            if (control) {
                 final Controller controller = new Controller(device, connection, options.getClipboardAutosync());
 
                 // asynchronous
@@ -199,10 +206,6 @@ public final class Server {
                     Rect crop = parseCrop(value);
                     options.setCrop(crop);
                     break;
-                case "send_frame_meta":
-                    boolean sendFrameMeta = Boolean.parseBoolean(value);
-                    options.setSendFrameMeta(sendFrameMeta);
-                    break;
                 case "control":
                     boolean control = Boolean.parseBoolean(value);
                     options.setControl(control);
@@ -236,6 +239,30 @@ public final class Server {
                     boolean clipboardAutosync = Boolean.parseBoolean(value);
                     options.setClipboardAutosync(clipboardAutosync);
                     break;
+                case "downsize_on_error":
+                    boolean downsizeOnError = Boolean.parseBoolean(value);
+                    options.setDownsizeOnError(downsizeOnError);
+                    break;
+                case "send_device_meta":
+                    boolean sendDeviceMeta = Boolean.parseBoolean(value);
+                    options.setSendDeviceMeta(sendDeviceMeta);
+                    break;
+                case "send_frame_meta":
+                    boolean sendFrameMeta = Boolean.parseBoolean(value);
+                    options.setSendFrameMeta(sendFrameMeta);
+                    break;
+                case "send_dummy_byte":
+                    boolean sendDummyByte = Boolean.parseBoolean(value);
+                    options.setSendDummyByte(sendDummyByte);
+                    break;
+                case "raw_video_stream":
+                    boolean rawVideoStream = Boolean.parseBoolean(value);
+                    if (rawVideoStream) {
+                        options.setSendDeviceMeta(false);
+                        options.setSendFrameMeta(false);
+                        options.setSendDummyByte(false);
+                    }
+                    break;
                 default:
                     Ln.w("Unknown server option: " + key);
                     break;
@@ -262,16 +289,6 @@ public final class Server {
     }
 
     private static void suggestFix(Throwable e) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (e instanceof MediaCodec.CodecException) {
-                MediaCodec.CodecException mce = (MediaCodec.CodecException) e;
-                if (mce.getErrorCode() == 0xfffffc0e) {
-                    Ln.e("The hardware encoder is not able to encode at the given definition.");
-                    Ln.e("Try with a lower definition:");
-                    Ln.e("    scrcpy -m 1024");
-                }
-            }
-        }
         if (e instanceof InvalidDisplayIdException) {
             InvalidDisplayIdException idie = (InvalidDisplayIdException) e;
             int[] displayIds = idie.getAvailableDisplayIds();

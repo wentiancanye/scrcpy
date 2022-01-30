@@ -22,7 +22,7 @@ const struct scrcpy_options scrcpy_options_default = {
     .tunnel_host = 0,
     .tunnel_port = 0,
     .shortcut_mods = {
-        .data = {SC_MOD_LALT, SC_MOD_LSUPER},
+        .data = {SC_SHORTCUT_MOD_LALT, SC_SHORTCUT_MOD_LSUPER},
         .count = 2,
     },
     .max_size = 0,
@@ -37,6 +37,9 @@ const struct scrcpy_options scrcpy_options_default = {
     .display_id = 0,
     .display_buffer = 0,
     .v4l2_buffer = 0,
+#ifdef HAVE_USB
+    .otg = false,
+#endif
     .show_touches = false,
     .fullscreen = false,
     .always_on_top = false,
@@ -54,6 +57,7 @@ const struct scrcpy_options scrcpy_options_default = {
     .legacy_paste = false,
     .power_off_on_close = false,
     .clipboard_autosync = true,
+    .downsize_on_error = true,
     .tcpip = false,
     .tcpip_dst = NULL,
 };

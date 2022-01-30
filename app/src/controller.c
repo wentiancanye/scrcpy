@@ -5,8 +5,8 @@
 #include "util/log.h"
 
 bool
-controller_init(struct controller *controller, sc_socket control_socket,
-                struct sc_acksync *acksync) {
+sc_controller_init(struct sc_controller *controller, sc_socket control_socket,
+                   struct sc_acksync *acksync) {
     cbuf_init(&controller->queue);
 
     bool ok = receiver_init(&controller->receiver, control_socket, acksync);
@@ -34,23 +34,23 @@ controller_init(struct controller *controller, sc_socket control_socket,
 }
 
 void
-controller_destroy(struct controller *controller) {
+sc_controller_destroy(struct sc_controller *controller) {
     sc_cond_destroy(&controller->msg_cond);
     sc_mutex_destroy(&controller->mutex);
 
-    struct control_msg msg;
+    struct sc_control_msg msg;
     while (cbuf_take(&controller->queue, &msg)) {
-        control_msg_destroy(&msg);
+        sc_control_msg_destroy(&msg);
     }
 
     receiver_destroy(&controller->receiver);
 }
 
 bool
-controller_push_msg(struct controller *controller,
-                    const struct control_msg *msg) {
+sc_controller_push_msg(struct sc_controller *controller,
+                       const struct sc_control_msg *msg) {
     if (sc_get_log_level() <= SC_LOG_LEVEL_VERBOSE) {
-        control_msg_log(msg);
+        sc_control_msg_log(msg);
     }
 
     sc_mutex_lock(&controller->mutex);
@@ -64,9 +64,10 @@ controller_push_msg(struct controller *controller,
 }
 
 static bool
-process_msg(struct controller *controller, const struct control_msg *msg) {
-    static unsigned char serialized_msg[CONTROL_MSG_MAX_SIZE];
-    size_t length = control_msg_serialize(msg, serialized_msg);
+process_msg(struct sc_controller *controller,
+            const struct sc_control_msg *msg) {
+    static unsigned char serialized_msg[SC_CONTROL_MSG_MAX_SIZE];
+    size_t length = sc_control_msg_serialize(msg, serialized_msg);
     if (!length) {
         return false;
     }
@@ -77,7 +78,7 @@ process_msg(struct controller *controller, const struct control_msg *msg) {
 
 static int
 run_controller(void *data) {
-    struct controller *controller = data;
+    struct sc_controller *controller = data;
 
     for (;;) {
         sc_mutex_lock(&controller->mutex);
@@ -89,14 +90,14 @@ run_controller(void *data) {
             sc_mutex_unlock(&controller->mutex);
             break;
         }
-        struct control_msg msg;
+        struct sc_control_msg msg;
         bool non_empty = cbuf_take(&controller->queue, &msg);
         assert(non_empty);
         (void) non_empty;
         sc_mutex_unlock(&controller->mutex);
 
         bool ok = process_msg(controller, &msg);
-        control_msg_destroy(&msg);
+        sc_control_msg_destroy(&msg);
         if (!ok) {
             LOGD("Could not write msg to socket");
             break;
@@ -106,18 +107,18 @@ run_controller(void *data) {
 }
 
 bool
-controller_start(struct controller *controller) {
+sc_controller_start(struct sc_controller *controller) {
     LOGD("Starting controller thread");
 
     bool ok = sc_thread_create(&controller->thread, run_controller,
-                               "controller", controller);
+                               "scrcpy-ctl", controller);
     if (!ok) {
         LOGC("Could not start controller thread");
         return false;
     }
 
     if (!receiver_start(&controller->receiver)) {
-        controller_stop(controller);
+        sc_controller_stop(controller);
         sc_thread_join(&controller->thread, NULL);
         return false;
     }
@@ -126,7 +127,7 @@ controller_start(struct controller *controller) {
 }
 
 void
-controller_stop(struct controller *controller) {
+sc_controller_stop(struct sc_controller *controller) {
     sc_mutex_lock(&controller->mutex);
     controller->stopped = true;
     sc_cond_signal(&controller->msg_cond);
@@ -134,7 +135,7 @@ controller_stop(struct controller *controller) {
 }
 
 void
-controller_join(struct controller *controller) {
+sc_controller_join(struct sc_controller *controller) {
     sc_thread_join(&controller->thread, NULL);
     receiver_join(&controller->receiver);
 }

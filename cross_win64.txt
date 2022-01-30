@@ -7,6 +7,7 @@ cpp = 'x86_64-w64-mingw32-g++'
 ar = 'x86_64-w64-mingw32-ar'
 strip = 'x86_64-w64-mingw32-strip'
 pkgconfig = 'x86_64-w64-mingw32-pkg-config'
+windres = 'x86_64-w64-mingw32-windres'
 
 [host_machine]
 system = 'windows'
@@ -15,6 +16,8 @@ cpu = 'x86_64'
 endian = 'little'
 
 [properties]
-prebuilt_ffmpeg_shared = 'ffmpeg-4.3.1-win64-shared'
-prebuilt_ffmpeg_dev = 'ffmpeg-4.3.1-win64-dev'
-prebuilt_sdl2 = 'SDL2-2.0.16/x86_64-w64-mingw32'
+ffmpeg_avcodec = 'avcodec-59'
+ffmpeg_avformat = 'avformat-59'
+ffmpeg_avutil = 'avutil-57'
+prebuilt_ffmpeg = 'ffmpeg-win64-5.0'
+prebuilt_sdl2 = 'SDL2-2.0.20/x86_64-w64-mingw32'

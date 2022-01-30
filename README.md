@@ -1,6 +1,8 @@
-# scrcpy (v1.21)
+# scrcpy (v1.22)
 
 <img src="data/icon.svg" width="128" height="128" alt="scrcpy" align="right" />
+
+_pronounced "**scr**een **c**o**py**"_
 
 [Read in another language](#translations)
 
@@ -31,6 +33,9 @@ Its features include:
  - device screen [as a webcam (V4L2)](#v4l2loopback) (Linux-only)
  - [physical keyboard simulation (HID)](#physical-keyboard-simulation-hid)
    (Linux-only)
+ - [physical mouse simulation (HID)](#physical-mouse-simulation-hid)
+   (Linux-only)
+ - [OTG mode](#otg) (Linux-only)
  - and more…
 
 ## Requirements
@@ -71,6 +76,12 @@ On Debian and Ubuntu:
 apt install scrcpy
 ```
 
+On Arch Linux:
+
+```
+pacman -S scrcpy
+```
+
 A [Snap] package is available: [`scrcpy`][snap-link].
 
 [snap-link]: https://snapstats.org/snaps/scrcpy
@@ -82,10 +93,6 @@ For Fedora, a [COPR] package is available: [`scrcpy`][copr-link].
 [COPR]: https://fedoraproject.org/wiki/Category:Copr
 [copr-link]: https://copr.fedorainfracloud.org/coprs/zeno/scrcpy/
 
-For Arch Linux, an [AUR] package is available: [`scrcpy`][aur-link].
-
-[AUR]: https://wiki.archlinux.org/index.php/Arch_User_Repository
-[aur-link]: https://aur.archlinux.org/packages/scrcpy/
 
 For Gentoo, an [Ebuild] is available: [`scrcpy/`][ebuild-link].
 
@@ -101,10 +108,10 @@ process][BUILD_simple]).
 For Windows, for simplicity, a prebuilt archive with all the dependencies
 (including `adb`) is available:
 
- - [`scrcpy-win64-v1.21.zip`][direct-win64]  
-   _(SHA-256: fdab0c1421353b592a9bbcebd6e252675eadccca65cca8105686feaa9c1ded53)_
+ - [`scrcpy-win64-v1.22.zip`][direct-win64]  
+   _(SHA-256: ce4d9b8cc761e29862c4a72d8ad6f538bdd1f1831d15fd1f36633cd3b403db82)_
 
-[direct-win64]: https://github.com/Genymobile/scrcpy/releases/download/v1.21/scrcpy-win64-v1.21.zip
+[direct-win64]: https://github.com/Genymobile/scrcpy/releases/download/v1.22/scrcpy-win64-v1.22.zip
 
 It is also available in [Chocolatey]:
 
@@ -815,6 +822,65 @@ a physical keyboard is connected).
 
 [Physical keyboard]: https://github.com/Genymobile/scrcpy/pull/2632#issuecomment-923756915
 
+#### Physical mouse simulation (HID)
+
+Similarly to the physical keyboard simulation, it is possible to simulate a
+physical mouse. Likewise, it only works if the device is connected by USB, and
+is currently only supported on Linux.
+
+By default, scrcpy uses Android mouse events injection, using absolute
+coordinates. By simulating a physical mouse, a mouse pointer appears on the
+Android device, and relative mouse motion, clicks and scrolls are injected.
+
+To enable this mode:
+
+```bash
+scrcpy --hid-mouse
+scrcpy -M  # short version
+```
+
+You could also add `--forward-all-clicks` to [forward all mouse
+buttons][forward_all_clicks].
+
+[forward_all_clicks]: #right-click-and-middle-click
+
+When this mode is enabled, the computer mouse is "captured" (the mouse pointer
+disappears from the computer and appears on the Android device instead).
+
+Special capture keys, either <kbd>Alt</kbd> or <kbd>Super</kbd>, toggle
+(disable or enable) the mouse capture. Use one of them to give the control of
+the mouse back to the computer.
+
+
+#### OTG
+
+It is possible to run _scrcpy_ with only physical keyboard and mouse simulation
+(HID), as if the computer keyboard and mouse were plugged directly to the device
+via an OTG cable.
+
+In this mode, _adb_ (USB debugging) is not necessary, and mirroring is disabled.
+
+To enable OTG mode:
+
+```bash
+scrcpy --otg
+# Pass the serial if several USB devices are available
+scrcpy --otg -s 0123456789abcdef
+```
+
+It is possible to enable only HID keyboard or HID mouse:
+
+```bash
+scrcpy --otg --hid-keyboard              # keyboard only
+scrcpy --otg --hid-mouse                 # mouse only
+scrcpy --otg --hid-keyboard --hid-mouse  # keyboard and mouse
+# for convenience, enable both by default
+scrcpy --otg                             # keyboard and mouse
+```
+
+Like `--hid-keyboard` and `--hid-mouse`, it only works if the device is
+connected by USB, and is currently only supported on Linux.
+
 
 #### Text injection preference
 
@@ -936,7 +1002,7 @@ _<kbd>[Super]</kbd> is typically the <kbd>Windows</kbd> or <kbd>Cmd</kbd> key._
  | Click on `HOME`                             | <kbd>MOD</kbd>+<kbd>h</kbd> \| _Middle-click_
  | Click on `BACK`                             | <kbd>MOD</kbd>+<kbd>b</kbd> \| _Right-click²_
  | Click on `APP_SWITCH`                       | <kbd>MOD</kbd>+<kbd>s</kbd> \| _4th-click³_
- | Click on `MENU` (unlock screen)             | <kbd>MOD</kbd>+<kbd>m</kbd>
+ | Click on `MENU` (unlock screen)⁴            | <kbd>MOD</kbd>+<kbd>m</kbd>
  | Click on `VOLUME_UP`                        | <kbd>MOD</kbd>+<kbd>↑</kbd> _(up)_
  | Click on `VOLUME_DOWN`                      | <kbd>MOD</kbd>+<kbd>↓</kbd> _(down)_
  | Click on `POWER`                            | <kbd>MOD</kbd>+<kbd>p</kbd>
@@ -947,9 +1013,9 @@ _<kbd>[Super]</kbd> is typically the <kbd>Windows</kbd> or <kbd>Cmd</kbd> key._
  | Expand notification panel                   | <kbd>MOD</kbd>+<kbd>n</kbd> \| _5th-click³_
  | Expand settings panel                       | <kbd>MOD</kbd>+<kbd>n</kbd>+<kbd>n</kbd> \| _Double-5th-click³_
  | Collapse panels                             | <kbd>MOD</kbd>+<kbd>Shift</kbd>+<kbd>n</kbd>
- | Copy to clipboard⁴                          | <kbd>MOD</kbd>+<kbd>c</kbd>
- | Cut to clipboard⁴                           | <kbd>MOD</kbd>+<kbd>x</kbd>
- | Synchronize clipboards and paste⁴           | <kbd>MOD</kbd>+<kbd>v</kbd>
+ | Copy to clipboard⁵                          | <kbd>MOD</kbd>+<kbd>c</kbd>
+ | Cut to clipboard⁵                           | <kbd>MOD</kbd>+<kbd>x</kbd>
+ | Synchronize clipboards and paste⁵           | <kbd>MOD</kbd>+<kbd>v</kbd>
  | Inject computer clipboard text              | <kbd>MOD</kbd>+<kbd>Shift</kbd>+<kbd>v</kbd>
  | Enable/disable FPS counter (on stdout)      | <kbd>MOD</kbd>+<kbd>i</kbd>
  | Pinch-to-zoom                               | <kbd>Ctrl</kbd>+_click-and-move_
@@ -959,7 +1025,8 @@ _<kbd>[Super]</kbd> is typically the <kbd>Windows</kbd> or <kbd>Cmd</kbd> key._
 _¹Double-click on black borders to remove them._  
 _²Right-click turns the screen on if it was off, presses BACK otherwise._  
 _³4th and 5th mouse buttons, if your mouse has them._  
-_⁴Only on Android >= 7._
+_⁴For react-native apps in development, `MENU` triggers development menu._  
+_⁵Only on Android >= 7._
 
 Shortcuts with repeated keys are executted by releasing and pressing the key a
 second time. For example, to execute "Expand settings panel":
@@ -1017,7 +1084,7 @@ Read the [developers page].
 ## Licence
 
     Copyright (C) 2018 Genymobile
-    Copyright (C) 2018-2021 Romain Vimont
+    Copyright (C) 2018-2022 Romain Vimont
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -1048,8 +1115,8 @@ This README is available in other languages:
 - [日本語 (Japanese, `jp`) - v1.19](README.jp.md)
 - [한국어 (Korean, `ko`) - v1.11](README.ko.md)
 - [Português Brasileiro (Brazilian Portuguese, `pt-BR`) - v1.19](README.pt-br.md)
-- [Español (Spanish, `sp`) - v1.17](README.sp.md)
-- [简体中文 (Simplified Chinese, `zh-Hans`) - v1.20](README.zh-Hans.md)
+- [Español (Spanish, `sp`) - v1.21](README.sp.md)
+- [简体中文 (Simplified Chinese, `zh-Hans`) - v1.21](README.zh-Hans.md)
 - [繁體中文 (Traditional Chinese, `zh-Hant`) - v1.15](README.zh-Hant.md)
 - [Turkish (Turkish, `tr`) - v1.18](README.tr.md)
 

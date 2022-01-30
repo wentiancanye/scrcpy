@@ -96,6 +96,8 @@ The keyboard layout must be configured (once and for all) on the device, via Set
 
 However, the option is only available when the HID keyboard is enabled (or a physical keyboard is connected).
 
+Also see \fB\-\-hid\-mouse\fR.
+
 .TP
 .B \-\-legacy\-paste
 Inject computer clipboard text as a sequence of key events on Ctrl+v (like MOD+Shift+v).
@@ -121,10 +123,28 @@ Limit both the width and height of the video to \fIvalue\fR. The other dimension
 Default is 0 (unlimited).
 
 .TP
+.B \-M, \-\-hid\-mouse
+Simulate a physical mouse by using HID over AOAv2.
+
+In this mode, the computer mouse is captured to control the device directly (relative mouse mode).
+
+LAlt, LSuper or RSuper toggle the capture mode, to give control of the mouse back to the computer.
+
+It may only work over USB, and is currently only supported on Linux.
+
+Also see \fB\-\-hid\-keyboard\fR.
+
+.TP
 .B \-\-no\-clipboard\-autosync
 By default, scrcpy automatically synchronizes the computer clipboard to the device clipboard before injecting Ctrl+v, and the device clipboard to the computer clipboard whenever it changes.
 
 This option disables this automatic synchronization.
+
+.TP
+.B \-\-no\-downsize\-on\-error
+By default, on MediaCodec error, scrcpy automatically tries again with a lower definition.
+
+This option disables this behavior.
 
 .TP
 .B \-n, \-\-no\-control
@@ -141,6 +161,20 @@ Do not forward repeated key events when a key is held down.
 .TP
 .B \-\-no\-mipmaps
 If the renderer is OpenGL 3.0+ or OpenGL ES 2.0+, then mipmaps are automatically generated to improve downscaling quality. This option disables the generation of mipmaps.
+
+.TP
+.B \-\-otg
+Run in OTG mode: simulate physical keyboard and mouse, as if the computer keyboard and mouse were plugged directly to the device via an OTG cable.
+
+In this mode, adb (USB debugging) is not necessary, and mirroring is disabled.
+
+LAlt, LSuper or RSuper toggle the mouse capture mode, to give control of the mouse back to the computer.
+
+If any of \fB\-\-hid\-keyboard\fR or \fB\-\-hid\-mouse\fR is set, only enable keyboard or mouse respectively, otherwise enable both.
+
+It may only work over USB, and is currently only supported on Linux.
+
+See \fB\-\-hid\-keyboard\fR and \fB\-\-hid\-mouse\fR.
 
 .TP
 .BI "\-p, \-\-port " port[:port]
@@ -413,11 +447,15 @@ Push file to device (see \fB\-\-push\-target\fR)
 
 .TP
 .B ADB
-Specify the path to adb.
+Path to adb.
+
+.TP
+.B SCRCPY_ICON_PATH
+Path to the program icon.
 
 .TP
 .B SCRCPY_SERVER_PATH
-Specify the path to server binary.
+Path to the server binary.
 
 
 .SH AUTHORS
@@ -442,7 +480,7 @@ Copyright \(co 2018 Genymobile
 Genymobile
 .UE
 
-Copyright \(co 2018\-2020
+Copyright \(co 2018\-2022
 .MT rom@rom1v.com
 Romain Vimont
 .ME

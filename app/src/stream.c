@@ -1,7 +1,6 @@
 #include "stream.h"
 
 #include <assert.h>
-#include <libavformat/avformat.h>
 #include <libavutil/time.h>
 #include <unistd.h>
 
@@ -192,7 +191,7 @@ static int
 run_stream(void *data) {
     struct stream *stream = data;
 
-    AVCodec *codec = avcodec_find_decoder(AV_CODEC_ID_H264);
+    const AVCodec *codec = avcodec_find_decoder(AV_CODEC_ID_H264);
     if (!codec) {
         LOGE("H.264 decoder not found");
         goto end;
@@ -284,7 +283,8 @@ bool
 stream_start(struct stream *stream) {
     LOGD("Starting stream thread");
 
-    bool ok = sc_thread_create(&stream->thread, run_stream, "stream", stream);
+    bool ok =
+        sc_thread_create(&stream->thread, run_stream, "scrcpy-stream", stream);
     if (!ok) {
         LOGC("Could not start stream thread");
         return false;
