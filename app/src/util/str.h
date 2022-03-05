@@ -104,17 +104,6 @@ char *
 sc_str_wrap_lines(const char *input, unsigned columns, unsigned indent);
 
 /**
- * Truncate the data after any of the characters from `endchars`
- *
- * An '\0' is always written at the end of the data, even if no newline
- * character is encountered.
- *
- * Return the size of the resulting line.
- */
-size_t
-sc_str_truncate(char *data, size_t len, const char *endchars);
-
-/**
  * Find the start of a column in a string
  *
  * A string may represent several columns, separated by some "spaces"

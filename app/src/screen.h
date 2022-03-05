@@ -26,7 +26,7 @@ struct sc_screen {
 
     struct sc_input_manager im;
     struct sc_video_buffer vb;
-    struct fps_counter fps_counter;
+    struct sc_fps_counter fps_counter;
 
     // The initial requested window properties
     struct {
@@ -35,6 +35,7 @@ struct sc_screen {
         uint16_t width;
         uint16_t height;
         bool fullscreen;
+        bool start_fps_counter;
     } req;
 
     SDL_Window *window;
@@ -60,7 +61,6 @@ struct sc_screen {
 
     bool event_failed; // in case SDL_PushEvent() returned an error
 
-    bool mouse_captured; // only relevant in relative mouse mode
     // To enable/disable mouse capture, a mouse capture key (LALT, LGUI or
     // RGUI) must be pressed. This variable tracks the pressed capture key.
     SDL_Keycode mouse_capture_key_pressed;
@@ -94,6 +94,7 @@ struct sc_screen_params {
     bool mipmaps;
 
     bool fullscreen;
+    bool start_fps_counter;
 
     sc_tick buffering_time;
 };

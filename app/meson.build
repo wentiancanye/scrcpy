@@ -1,14 +1,16 @@
 src = [
     'src/main.c',
-    'src/adb.c',
-    'src/adb_parser.c',
-    'src/adb_tunnel.c',
+    'src/adb/adb.c',
+    'src/adb/adb_device.c',
+    'src/adb/adb_parser.c',
+    'src/adb/adb_tunnel.c',
     'src/cli.c',
     'src/clock.c',
     'src/compat.c',
     'src/control_msg.c',
     'src/controller.c',
     'src/decoder.c',
+    'src/demuxer.c',
     'src/device_msg.c',
     'src/icon.c',
     'src/file_pusher.c',
@@ -24,7 +26,7 @@ src = [
     'src/scrcpy.c',
     'src/screen.c',
     'src/server.c',
-    'src/stream.c',
+    'src/version.c',
     'src/video_buffer.c',
     'src/util/acksync.c',
     'src/util/file.c',
@@ -67,12 +69,12 @@ else
     endif
 endif
 
-v4l2_support = host_machine.system() == 'linux'
+v4l2_support = get_option('v4l2') and host_machine.system() == 'linux'
 if v4l2_support
     src += [ 'src/v4l2_sink.c' ]
 endif
 
-usb_support = host_machine.system() == 'linux'
+usb_support = get_option('usb')
 if usb_support
     src += [
         'src/usb/aoa_hid.c',
@@ -109,9 +111,9 @@ if not crossbuild_windows
 else
     # cross-compile mingw32 build (from Linux to Windows)
     prebuilt_sdl2 = meson.get_cross_property('prebuilt_sdl2')
-    sdl2_bin_dir = meson.current_source_dir() + '/../prebuilt-deps/data/' + prebuilt_sdl2 + '/bin'
-    sdl2_lib_dir = meson.current_source_dir() + '/../prebuilt-deps/data/' + prebuilt_sdl2 + '/lib'
-    sdl2_include_dir = '../prebuilt-deps/data/' + prebuilt_sdl2 + '/include'
+    sdl2_bin_dir = meson.current_source_dir() + '/prebuilt-deps/data/' + prebuilt_sdl2 + '/bin'
+    sdl2_lib_dir = meson.current_source_dir() + '/prebuilt-deps/data/' + prebuilt_sdl2 + '/lib'
+    sdl2_include_dir = 'prebuilt-deps/data/' + prebuilt_sdl2 + '/include'
 
     sdl2 = declare_dependency(
         dependencies: [
@@ -122,8 +124,8 @@ else
     )
 
     prebuilt_ffmpeg = meson.get_cross_property('prebuilt_ffmpeg')
-    ffmpeg_bin_dir = meson.current_source_dir() + '/../prebuilt-deps/data/' + prebuilt_ffmpeg + '/bin'
-    ffmpeg_include_dir = '../prebuilt-deps/data/' + prebuilt_ffmpeg + '/include'
+    ffmpeg_bin_dir = meson.current_source_dir() + '/prebuilt-deps/data/' + prebuilt_ffmpeg + '/bin'
+    ffmpeg_include_dir = 'prebuilt-deps/data/' + prebuilt_ffmpeg + '/include'
 
     # ffmpeg versions are different for win32 and win64 builds
     ffmpeg_avcodec = meson.get_cross_property('ffmpeg_avcodec')
@@ -139,9 +141,22 @@ else
         include_directories: include_directories(ffmpeg_include_dir)
     )
 
+    prebuilt_libusb = meson.get_cross_property('prebuilt_libusb')
+    prebuilt_libusb_root = meson.get_cross_property('prebuilt_libusb_root')
+    libusb_bin_dir = meson.current_source_dir() + '/prebuilt-deps/data/' + prebuilt_libusb + '/dll'
+    libusb_include_dir = 'prebuilt-deps/data/' + prebuilt_libusb_root + '/include'
+
+    libusb = declare_dependency(
+        dependencies: [
+            cc.find_library('libusb-1.0', dirs: libusb_bin_dir),
+        ],
+        include_directories: include_directories(libusb_include_dir)
+    )
+
     dependencies = [
         ffmpeg,
         sdl2,
+        libusb,
         cc.find_library('mingw32')
     ]
 
@@ -209,9 +224,13 @@ executable('scrcpy', src,
            c_args: [])
 
 install_man('scrcpy.1')
-install_data('../data/icon.png',
+install_data('data/icon.png',
              rename: 'scrcpy.png',
              install_dir: 'share/icons/hicolor/256x256/apps')
+install_data('data/zsh-completion/_scrcpy',
+             install_dir: 'share/zsh/site-functions')
+install_data('data/bash-completion/scrcpy',
+             install_dir: 'share/bash-completion/completions')
 
 
 ### TESTS
@@ -221,7 +240,8 @@ if get_option('buildtype') == 'debug'
     tests = [
         ['test_adb_parser', [
             'tests/test_adb_parser.c',
-            'src/adb_parser.c',
+            'src/adb/adb_device.c',
+            'src/adb/adb_parser.c',
             'src/util/str.c',
             'src/util/strbuf.c',
         ]],
@@ -265,6 +285,9 @@ if get_option('buildtype') == 'debug'
             'tests/test_str.c',
             'src/util/str.c',
             'src/util/strbuf.c',
+        ]],
+        ['test_vector', [
+            'tests/test_vector.c',
         ]],
     ]
 

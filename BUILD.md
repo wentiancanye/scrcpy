@@ -161,7 +161,8 @@ install the required packages:
 ```bash
 # runtime dependencies
 pacman -S mingw-w64-x86_64-SDL2 \
-          mingw-w64-x86_64-ffmpeg
+          mingw-w64-x86_64-ffmpeg \
+          mingw-w64-x86_64-libusb
 
 # client build dependencies
 pacman -S mingw-w64-x86_64-make \
@@ -175,7 +176,8 @@ For a 32 bits version, replace `x86_64` by `i686`:
 ```bash
 # runtime dependencies
 pacman -S mingw-w64-i686-SDL2 \
-          mingw-w64-i686-ffmpeg
+          mingw-w64-i686-ffmpeg \
+          mingw-w64-i686-libusb
 
 # client build dependencies
 pacman -S mingw-w64-i686-make \
@@ -199,7 +201,7 @@ Install the packages with [Homebrew]:
 
 ```bash
 # runtime dependencies
-brew install sdl2 ffmpeg
+brew install sdl2 ffmpeg libusb
 
 # client build dependencies
 brew install pkg-config meson
@@ -258,7 +260,7 @@ set ANDROID_SDK_ROOT=%LOCALAPPDATA%\Android\sdk
 Then, build:
 
 ```bash
-meson x --buildtype release --strip -Db_lto=true
+meson x --buildtype=release --strip -Db_lto=true
 ninja -Cx  # DO NOT RUN AS ROOT
 ```
 
@@ -270,16 +272,16 @@ install` must be run as root)._
 
 #### Option 2: Use prebuilt server
 
- - [`scrcpy-server-v1.22`][direct-scrcpy-server]  
-   _(SHA-256: c05d273eec7533c0e106282e0254cf04e7f5e8f0c2920ca39448865fab2a419b)_
+ - [`scrcpy-server-v1.23`][direct-scrcpy-server]  
+   _(SHA-256: 2a913fd47478c0b306fca507cb0beb625e49a19ff9fc7ab904e36ef5b9fe7e68)_
 
-[direct-scrcpy-server]: https://github.com/Genymobile/scrcpy/releases/download/v1.22/scrcpy-server-v1.22
+[direct-scrcpy-server]: https://github.com/Genymobile/scrcpy/releases/download/v1.23/scrcpy-server-v1.23
 
 Download the prebuilt server somewhere, and specify its path during the Meson
 configuration:
 
 ```bash
-meson x --buildtype release --strip -Db_lto=true \
+meson x --buildtype=release --strip -Db_lto=true \
     -Dprebuilt_server=/path/to/scrcpy-server
 ninja -Cx  # DO NOT RUN AS ROOT
 ```

@@ -15,6 +15,7 @@
 
 #include "controller.h"
 #include "decoder.h"
+#include "demuxer.h"
 #include "events.h"
 #include "file_pusher.h"
 #include "keyboard_inject.h"
@@ -22,7 +23,6 @@
 #include "recorder.h"
 #include "screen.h"
 #include "server.h"
-#include "stream.h"
 #ifdef HAVE_USB
 # include "usb/aoa_hid.h"
 # include "usb/hid_keyboard.h"
@@ -39,9 +39,9 @@
 struct scrcpy {
     struct sc_server server;
     struct sc_screen screen;
-    struct stream stream;
-    struct decoder decoder;
-    struct recorder recorder;
+    struct sc_demuxer demuxer;
+    struct sc_decoder decoder;
+    struct sc_recorder recorder;
 #ifdef HAVE_V4L2
     struct sc_v4l2_sink v4l2_sink;
 #endif
@@ -143,10 +143,8 @@ sdl_configure(bool display, bool disable_screensaver) {
     }
 
     if (disable_screensaver) {
-        LOGD("Screensaver disabled");
         SDL_DisableScreenSaver();
     } else {
-        LOGD("Screensaver enabled");
         SDL_EnableScreenSaver();
     }
 }
@@ -231,8 +229,8 @@ av_log_callback(void *avcl, int level, const char *fmt, va_list vl) {
 }
 
 static void
-stream_on_eos(struct stream *stream, void *userdata) {
-    (void) stream;
+sc_demuxer_on_eos(struct sc_demuxer *demuxer, void *userdata) {
+    (void) demuxer;
     (void) userdata;
 
     PUSH_EVENT(EVENT_STREAM_STOPPED);
@@ -271,7 +269,7 @@ scrcpy(struct scrcpy_options *options) {
 
     // Minimal SDL initialization
     if (SDL_Init(SDL_INIT_EVENTS)) {
-        LOGC("Could not initialize SDL: %s", SDL_GetError());
+        LOGE("Could not initialize SDL: %s", SDL_GetError());
         return false;
     }
 
@@ -285,7 +283,7 @@ scrcpy(struct scrcpy_options *options) {
 #ifdef HAVE_V4L2
     bool v4l2_sink_initialized = false;
 #endif
-    bool stream_started = false;
+    bool demuxer_started = false;
 #ifdef HAVE_USB
     bool aoa_hid_initialized = false;
     bool hid_keyboard_initialized = false;
@@ -298,7 +296,9 @@ scrcpy(struct scrcpy_options *options) {
     struct sc_acksync *acksync = NULL;
 
     struct sc_server_params params = {
-        .serial = options->serial,
+        .req_serial = options->serial,
+        .select_usb = options->select_usb,
+        .select_tcpip = options->select_tcpip,
         .log_level = options->log_level,
         .crop = options->crop,
         .port_range = options->port_range,
@@ -320,6 +320,7 @@ scrcpy(struct scrcpy_options *options) {
         .downsize_on_error = options->downsize_on_error,
         .tcpip = options->tcpip,
         .tcpip_dst = options->tcpip_dst,
+        .cleanup = options->cleanup,
     };
 
     static const struct sc_server_callbacks cbs = {
@@ -343,7 +344,7 @@ scrcpy(struct scrcpy_options *options) {
 
     // Initialize SDL video in addition if display is enabled
     if (options->display && SDL_Init(SDL_INIT_VIDEO)) {
-        LOGC("Could not initialize SDL: %s", SDL_GetError());
+        LOGE("Could not initialize SDL: %s", SDL_GetError());
         goto end;
     }
 
@@ -357,7 +358,7 @@ scrcpy(struct scrcpy_options *options) {
     // It is necessarily initialized here, since the device is connected
     struct sc_server_info *info = &s->server.info;
 
-    const char *serial = s->server.params.serial;
+    const char *serial = s->server.serial;
     assert(serial);
 
     struct sc_file_pusher *fp = NULL;
@@ -371,22 +372,22 @@ scrcpy(struct scrcpy_options *options) {
         file_pusher_initialized = true;
     }
 
-    struct decoder *dec = NULL;
+    struct sc_decoder *dec = NULL;
     bool needs_decoder = options->display;
 #ifdef HAVE_V4L2
     needs_decoder |= !!options->v4l2_device;
 #endif
     if (needs_decoder) {
-        decoder_init(&s->decoder);
+        sc_decoder_init(&s->decoder);
         dec = &s->decoder;
     }
 
-    struct recorder *rec = NULL;
+    struct sc_recorder *rec = NULL;
     if (options->record_filename) {
-        if (!recorder_init(&s->recorder,
-                           options->record_filename,
-                           options->record_format,
-                           info->frame_size)) {
+        if (!sc_recorder_init(&s->recorder,
+                              options->record_filename,
+                              options->record_format,
+                              info->frame_size)) {
             goto end;
         }
         rec = &s->recorder;
@@ -395,17 +396,17 @@ scrcpy(struct scrcpy_options *options) {
 
     av_log_set_callback(av_log_callback);
 
-    static const struct stream_callbacks stream_cbs = {
-        .on_eos = stream_on_eos,
+    static const struct sc_demuxer_callbacks demuxer_cbs = {
+        .on_eos = sc_demuxer_on_eos,
     };
-    stream_init(&s->stream, s->server.video_socket, &stream_cbs, NULL);
+    sc_demuxer_init(&s->demuxer, s->server.video_socket, &demuxer_cbs, NULL);
 
     if (dec) {
-        stream_add_sink(&s->stream, &dec->packet_sink);
+        sc_demuxer_add_sink(&s->demuxer, &dec->packet_sink);
     }
 
     if (rec) {
-        stream_add_sink(&s->stream, &rec->packet_sink);
+        sc_demuxer_add_sink(&s->demuxer, &rec->packet_sink);
     }
 
     struct sc_controller *controller = NULL;
@@ -432,32 +433,19 @@ scrcpy(struct scrcpy_options *options) {
             }
 
             assert(serial);
-            struct sc_usb_device usb_devices[16];
-            ssize_t count = sc_usb_find_devices(&s->usb, serial, usb_devices,
-                                                ARRAY_LEN(usb_devices));
-            if (count <= 0) {
-                LOGE("Could not find USB device %s", serial);
+            struct sc_usb_device usb_device;
+            ok = sc_usb_select_device(&s->usb, serial, &usb_device);
+            if (!ok) {
                 sc_usb_destroy(&s->usb);
-                sc_acksync_destroy(&s->acksync);
                 goto aoa_hid_end;
             }
-
-            if (count > 1) {
-                LOGE("Multiple (%d) devices with serial %s", (int) count, serial);
-                sc_usb_device_destroy_all(usb_devices, count);
-                sc_usb_destroy(&s->usb);
-                sc_acksync_destroy(&s->acksync);
-                goto aoa_hid_end;
-            }
-
-            struct sc_usb_device *usb_device = &usb_devices[0];
 
             LOGI("USB device: %s (%04" PRIx16 ":%04" PRIx16 ") %s %s",
-                 usb_device->serial, usb_device->vid, usb_device->pid,
-                 usb_device->manufacturer, usb_device->product);
+                 usb_device.serial, usb_device.vid, usb_device.pid,
+                 usb_device.manufacturer, usb_device.product);
 
-            ok = sc_usb_connect(&s->usb, usb_device->device, NULL, NULL);
-            sc_usb_device_destroy(usb_device);
+            ok = sc_usb_connect(&s->usb, usb_device.device, NULL, NULL);
+            sc_usb_device_destroy(&usb_device);
             if (!ok) {
                 LOGE("Failed to connect to USB device %s", serial);
                 sc_usb_destroy(&s->usb);
@@ -600,6 +588,7 @@ aoa_hid_end:
             .rotation = options->rotation,
             .mipmaps = options->mipmaps,
             .fullscreen = options->fullscreen,
+            .start_fps_counter = options->start_fps_counter,
             .buffering_time = options->display_buffer,
         };
 
@@ -608,7 +597,7 @@ aoa_hid_end:
         }
         screen_initialized = true;
 
-        decoder_add_sink(&s->decoder, &s->screen.frame_sink);
+        sc_decoder_add_sink(&s->decoder, &s->screen.frame_sink);
     }
 
 #ifdef HAVE_V4L2
@@ -618,28 +607,28 @@ aoa_hid_end:
             goto end;
         }
 
-        decoder_add_sink(&s->decoder, &s->v4l2_sink.frame_sink);
+        sc_decoder_add_sink(&s->decoder, &s->v4l2_sink.frame_sink);
 
         v4l2_sink_initialized = true;
     }
 #endif
 
     // now we consumed the header values, the socket receives the video stream
-    // start the stream
-    if (!stream_start(&s->stream)) {
+    // start the demuxer
+    if (!sc_demuxer_start(&s->demuxer)) {
         goto end;
     }
-    stream_started = true;
+    demuxer_started = true;
 
     ret = event_loop(s);
     LOGD("quit...");
 
     // Close the window immediately on closing, because screen_destroy() may
-    // only be called once the stream thread is joined (it may take time)
+    // only be called once the demuxer thread is joined (it may take time)
     sc_screen_hide_window(&s->screen);
 
 end:
-    // The stream is not stopped explicitly, because it will stop by itself on
+    // The demuxer is not stopped explicitly, because it will stop by itself on
     // end-of-stream
 #ifdef HAVE_USB
     if (aoa_hid_initialized) {
@@ -671,10 +660,10 @@ end:
         sc_server_stop(&s->server);
     }
 
-    // now that the sockets are shutdown, the stream and controller are
+    // now that the sockets are shutdown, the demuxer and controller are
     // interrupted, we can join them
-    if (stream_started) {
-        stream_join(&s->stream);
+    if (demuxer_started) {
+        sc_demuxer_join(&s->demuxer);
     }
 
 #ifdef HAVE_V4L2
@@ -693,7 +682,7 @@ end:
     }
 #endif
 
-    // Destroy the screen only after the stream is guaranteed to be finished,
+    // Destroy the screen only after the demuxer is guaranteed to be finished,
     // because otherwise the screen could receive new frames after destruction
     if (screen_initialized) {
         sc_screen_join(&s->screen);
@@ -708,7 +697,7 @@ end:
     }
 
     if (recorder_initialized) {
-        recorder_destroy(&s->recorder);
+        sc_recorder_destroy(&s->recorder);
     }
 
     if (file_pusher_initialized) {

@@ -163,14 +163,44 @@ sc_screen_is_relative_mode(struct sc_screen *screen) {
 }
 
 static void
-sc_screen_capture_mouse(struct sc_screen *screen, bool capture) {
+sc_screen_set_mouse_capture(struct sc_screen *screen, bool capture) {
+#ifdef __APPLE__
+    // Workaround for SDL bug on macOS:
+    // <https://github.com/libsdl-org/SDL/issues/5340>
+    if (capture) {
+        int mouse_x, mouse_y;
+        SDL_GetGlobalMouseState(&mouse_x, &mouse_y);
+
+        int x, y, w, h;
+        SDL_GetWindowPosition(screen->window, &x, &y);
+        SDL_GetWindowSize(screen->window, &w, &h);
+
+        bool outside_window = mouse_x < x || mouse_x >= x + w
+                           || mouse_y < y || mouse_y >= y + h;
+        if (outside_window) {
+            SDL_WarpMouseInWindow(screen->window, w / 2, h / 2);
+        }
+    }
+#else
+    (void) screen;
+#endif
     if (SDL_SetRelativeMouseMode(capture)) {
         LOGE("Could not set relative mouse mode to %s: %s",
              capture ? "true" : "false", SDL_GetError());
-        return;
     }
+}
 
-    screen->mouse_captured = capture;
+static inline bool
+sc_screen_get_mouse_capture(struct sc_screen *screen) {
+    (void) screen;
+    return SDL_GetRelativeMouseMode();
+}
+
+static inline void
+sc_screen_toggle_mouse_capture(struct sc_screen *screen) {
+    (void) screen;
+    bool new_value = !sc_screen_get_mouse_capture(screen);
+    sc_screen_set_mouse_capture(screen, new_value);
 }
 
 static void
@@ -340,7 +370,7 @@ sc_video_buffer_on_new_frame(struct sc_video_buffer *vb, bool previous_skipped,
 
     bool need_new_event;
     if (previous_skipped) {
-        fps_counter_add_skipped_frame(&screen->fps_counter);
+        sc_fps_counter_add_skipped_frame(&screen->fps_counter);
         // The EVENT_NEW_FRAME triggered for the previous frame will consume
         // this new frame instead, unless the previous event failed
         need_new_event = screen->event_failed;
@@ -372,7 +402,6 @@ sc_screen_init(struct sc_screen *screen,
     screen->fullscreen = false;
     screen->maximized = false;
     screen->event_failed = false;
-    screen->mouse_captured = false;
     screen->mouse_capture_key_pressed = 0;
 
     screen->req.x = params->window_x;
@@ -380,6 +409,7 @@ sc_screen_init(struct sc_screen *screen,
     screen->req.width = params->window_width;
     screen->req.height = params->window_height;
     screen->req.fullscreen = params->fullscreen;
+    screen->req.start_fps_counter = params->start_fps_counter;
 
     static const struct sc_video_buffer_callbacks cbs = {
         .on_new_frame = sc_video_buffer_on_new_frame,
@@ -396,7 +426,7 @@ sc_screen_init(struct sc_screen *screen,
         goto error_destroy_video_buffer;
     }
 
-    if (!fps_counter_init(&screen->fps_counter)) {
+    if (!sc_fps_counter_init(&screen->fps_counter)) {
         goto error_stop_and_join_video_buffer;
     }
 
@@ -423,14 +453,14 @@ sc_screen_init(struct sc_screen *screen,
     screen->window =
         SDL_CreateWindow(params->window_title, 0, 0, 0, 0, window_flags);
     if (!screen->window) {
-        LOGC("Could not create window: %s", SDL_GetError());
+        LOGE("Could not create window: %s", SDL_GetError());
         goto error_destroy_fps_counter;
     }
 
     screen->renderer = SDL_CreateRenderer(screen->window, -1,
                                           SDL_RENDERER_ACCELERATED);
     if (!screen->renderer) {
-        LOGC("Could not create renderer: %s", SDL_GetError());
+        LOGE("Could not create renderer: %s", SDL_GetError());
         goto error_destroy_window;
     }
 
@@ -479,7 +509,7 @@ sc_screen_init(struct sc_screen *screen,
                                                   params->frame_size.height);
     screen->texture = create_texture(screen);
     if (!screen->texture) {
-        LOGC("Could not create texture: %s", SDL_GetError());
+        LOGE("Could not create texture: %s", SDL_GetError());
         goto error_destroy_renderer;
     }
 
@@ -528,7 +558,7 @@ error_destroy_renderer:
 error_destroy_window:
     SDL_DestroyWindow(screen->window);
 error_destroy_fps_counter:
-    fps_counter_destroy(&screen->fps_counter);
+    sc_fps_counter_destroy(&screen->fps_counter);
 error_stop_and_join_video_buffer:
     sc_video_buffer_stop(&screen->vb);
     sc_video_buffer_join(&screen->vb);
@@ -556,6 +586,10 @@ sc_screen_show_initial_window(struct sc_screen *screen) {
         sc_screen_switch_fullscreen(screen);
     }
 
+    if (screen->req.start_fps_counter) {
+        sc_fps_counter_start(&screen->fps_counter);
+    }
+
     SDL_ShowWindow(screen->window);
 }
 
@@ -567,13 +601,13 @@ sc_screen_hide_window(struct sc_screen *screen) {
 void
 sc_screen_interrupt(struct sc_screen *screen) {
     sc_video_buffer_stop(&screen->vb);
-    fps_counter_interrupt(&screen->fps_counter);
+    sc_fps_counter_interrupt(&screen->fps_counter);
 }
 
 void
 sc_screen_join(struct sc_screen *screen) {
     sc_video_buffer_join(&screen->vb);
-    fps_counter_join(&screen->fps_counter);
+    sc_fps_counter_join(&screen->fps_counter);
 }
 
 void
@@ -585,7 +619,7 @@ sc_screen_destroy(struct sc_screen *screen) {
     SDL_DestroyTexture(screen->texture);
     SDL_DestroyRenderer(screen->renderer);
     SDL_DestroyWindow(screen->window);
-    fps_counter_destroy(&screen->fps_counter);
+    sc_fps_counter_destroy(&screen->fps_counter);
     sc_video_buffer_destroy(&screen->vb);
 }
 
@@ -666,7 +700,7 @@ prepare_for_frame(struct sc_screen *screen, struct sc_size new_frame_size) {
                      screen->frame_size.width, screen->frame_size.height);
         screen->texture = create_texture(screen);
         if (!screen->texture) {
-            LOGC("Could not create texture: %s", SDL_GetError());
+            LOGE("Could not create texture: %s", SDL_GetError());
             return false;
         }
     }
@@ -695,7 +729,7 @@ sc_screen_update_frame(struct sc_screen *screen) {
     sc_video_buffer_consume(&screen->vb, screen->frame);
     AVFrame *frame = screen->frame;
 
-    fps_counter_add_rendered_frame(&screen->fps_counter);
+    sc_fps_counter_add_rendered_frame(&screen->fps_counter);
 
     struct sc_size new_frame_size = {frame->width, frame->height};
     if (!prepare_for_frame(screen, new_frame_size)) {
@@ -710,7 +744,7 @@ sc_screen_update_frame(struct sc_screen *screen) {
 
         if (sc_screen_is_relative_mode(screen)) {
             // Capture mouse on start
-            sc_screen_capture_mouse(screen, true);
+            sc_screen_set_mouse_capture(screen, true);
         }
     }
 
@@ -823,7 +857,7 @@ sc_screen_handle_event(struct sc_screen *screen, SDL_Event *event) {
                     break;
                 case SDL_WINDOWEVENT_FOCUS_LOST:
                     if (relative_mode) {
-                        sc_screen_capture_mouse(screen, false);
+                        sc_screen_set_mouse_capture(screen, false);
                     }
                     break;
             }
@@ -853,8 +887,7 @@ sc_screen_handle_event(struct sc_screen *screen, SDL_Event *event) {
                     if (key == cap) {
                         // A mouse capture key has been pressed then released:
                         // toggle the capture mouse mode
-                        sc_screen_capture_mouse(screen,
-                                                !screen->mouse_captured);
+                        sc_screen_toggle_mouse_capture(screen);
                     }
                     // Mouse capture keys are never forwarded to the device
                     return;
@@ -864,7 +897,7 @@ sc_screen_handle_event(struct sc_screen *screen, SDL_Event *event) {
         case SDL_MOUSEWHEEL:
         case SDL_MOUSEMOTION:
         case SDL_MOUSEBUTTONDOWN:
-            if (relative_mode && !screen->mouse_captured) {
+            if (relative_mode && !sc_screen_get_mouse_capture(screen)) {
                 // Do not forward to input manager, the mouse will be captured
                 // on SDL_MOUSEBUTTONUP
                 return;
@@ -880,8 +913,8 @@ sc_screen_handle_event(struct sc_screen *screen, SDL_Event *event) {
             }
             break;
         case SDL_MOUSEBUTTONUP:
-            if (relative_mode && !screen->mouse_captured) {
-                sc_screen_capture_mouse(screen, true);
+            if (relative_mode && !sc_screen_get_mouse_capture(screen)) {
+                sc_screen_set_mouse_capture(screen, true);
                 return;
             }
             break;

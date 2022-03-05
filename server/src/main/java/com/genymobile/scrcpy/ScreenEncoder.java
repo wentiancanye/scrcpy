@@ -28,7 +28,8 @@ public class ScreenEncoder implements Device.RotationListener {
     // Keep the values in descending order
     private static final int[] MAX_SIZE_FALLBACK = {2560, 1920, 1600, 1280, 1024, 800};
 
-    private static final int NO_PTS = -1;
+    private static final long PACKET_FLAG_CONFIG = 1L << 63;
+    private static final long PACKET_FLAG_KEY_FRAME = 1L << 62;
 
     private final AtomicBoolean rotationChanged = new AtomicBoolean();
     private final ByteBuffer headerBuffer = ByteBuffer.allocate(12);
@@ -89,17 +90,19 @@ public class ScreenEncoder implements Device.RotationListener {
                 Rect unlockedVideoRect = screenInfo.getUnlockedVideoSize().toRect();
                 int videoRotation = screenInfo.getVideoRotation();
                 int layerStack = device.getLayerStack();
-
                 setSize(format, videoRect.width(), videoRect.height());
-                configure(codec, format);
-                Surface surface = codec.createInputSurface();
-                setDisplaySurface(display, surface, videoRotation, contentRect, unlockedVideoRect, layerStack);
-                codec.start();
+
+                Surface surface = null;
                 try {
+                    configure(codec, format);
+                    surface = codec.createInputSurface();
+                    setDisplaySurface(display, surface, videoRotation, contentRect, unlockedVideoRect, layerStack);
+                    codec.start();
+
                     alive = encode(codec, fd);
                     // do not call stop() on exception, it would trigger an IllegalStateException
                     codec.stop();
-                } catch (IllegalStateException e) {
+                } catch (IllegalStateException | IllegalArgumentException e) {
                     Ln.e("Encoding error: " + e.getClass().getName() + ": " + e.getMessage());
                     if (!downsizeOnError || firstFrameSent) {
                         // Fail immediately
@@ -119,7 +122,9 @@ public class ScreenEncoder implements Device.RotationListener {
                 } finally {
                     destroyDisplay(display);
                     codec.release();
-                    surface.release();
+                    if (surface != null) {
+                        surface.release();
+                    }
                 }
             } while (alive);
         } finally {
@@ -179,12 +184,15 @@ public class ScreenEncoder implements Device.RotationListener {
 
         long pts;
         if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-            pts = NO_PTS; // non-media data packet
+            pts = PACKET_FLAG_CONFIG; // non-media data packet
         } else {
             if (ptsOrigin == 0) {
                 ptsOrigin = bufferInfo.presentationTimeUs;
             }
             pts = bufferInfo.presentationTimeUs - ptsOrigin;
+            if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
+                pts |= PACKET_FLAG_KEY_FRAME;
+            }
         }
 
         headerBuffer.putLong(pts);

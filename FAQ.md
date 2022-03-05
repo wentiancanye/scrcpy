@@ -4,23 +4,16 @@
 
 Here are the common reported problems and their status.
 
+If you encounter any error, the first step is to upgrade to the latest version.
+
 
 ## `adb` issues
 
 `scrcpy` execute `adb` commands to initialize the connection with the device. If
 `adb` fails, then scrcpy will not work.
 
-In that case, it will print this error:
-
->     ERROR: "adb get-serialno" returned with value 1
-
 This is typically not a bug in _scrcpy_, but a problem in your environment.
 
-To find out the cause, execute:
-
-```bash
-adb devices
-```
 
 ### `adb` not found
 
@@ -30,13 +23,30 @@ On Windows, the current directory is in your `PATH`, and `adb.exe` is included
 in the release, so it should work out-of-the-box.
 
 
+### Device not detected
+
+>     ERROR: Could not find any ADB device
+
+Check that you correctly enabled [adb debugging][enable-adb].
+
+Your device must be detected by `adb`:
+
+```
+adb devices
+```
+
+If your device is not detected, you may need some [drivers] (on Windows). There is a separate [USB driver for Google devices][google-usb-driver].
+
+[enable-adb]: https://developer.android.com/studio/command-line/adb.html#Enabling
+[drivers]: https://developer.android.com/studio/run/oem-usb.html
+[google-usb-driver]: https://developer.android.com/studio/run/win-usb
+
+
 ### Device unauthorized
 
-
->     error: device unauthorized.
->     This adb server's $ADB_VENDOR_KEYS is not set
->     Try 'adb kill-server' if that seems wrong.
->     Otherwise check for a confirmation dialog on your device.
+>    ERROR: Device is unauthorized:
+>    ERROR:     -->   (usb)  0123456789abcdef          unauthorized
+>    ERROR: A popup should open on the device to request authorization.
 
 When connecting, a popup should open on the device. You must authorize USB
 debugging.
@@ -46,29 +56,27 @@ If it does not open, check [stackoverflow][device-unauthorized].
 [device-unauthorized]: https://stackoverflow.com/questions/23081263/adb-android-device-unauthorized
 
 
-### Device not detected
-
->     error: no devices/emulators found
-
-Check that you correctly enabled [adb debugging][enable-adb].
-
-If your device is not detected, you may need some [drivers] (on Windows). There is a separate [USB driver for Google devices][google-usb-driver].
-
-[enable-adb]: https://developer.android.com/studio/command-line/adb.html#Enabling
-[drivers]: https://developer.android.com/studio/run/oem-usb.html
-[google-usb-driver]: https://developer.android.com/studio/run/win-usb
-
-
 ### Several devices connected
 
 If several devices are connected, you will encounter this error:
 
->     error: more than one device/emulator
+ERROR: Multiple (2) ADB devices:
+ERROR:     -->   (usb)  0123456789abcdef                device  Nexus_5
+ERROR:     --> (tcpip)  192.168.1.5:5555                device  GM1913
+ERROR: Select a device via -s (--serial), -d (--select-usb) or -e (--select-tcpip)
 
-the identifier of the device you want to mirror must be provided:
+In that case, you can either provide the identifier of the device you want to
+mirror:
 
 ```bash
-scrcpy -s 01234567890abcdef
+scrcpy -s 0123456789abcdef
+```
+
+Or request the single USB (or TCP/IP) device:
+
+```bash
+scrcpy -d  # USB device
+scrcpy -e  # TCP/IP device
 ```
 
 Note that if your device is connected over TCP/IP, you might get this message:
@@ -150,21 +158,23 @@ screen, then you might get poor quality, especially visible on text (see [#40]).
 
 [#40]: https://github.com/Genymobile/scrcpy/issues/40
 
-To improve downscaling quality, trilinear filtering is enabled automatically
-if the renderer is OpenGL and if it supports mipmapping.
+This problem should be fixed in scrcpy v1.22: **update to the latest version**.
 
-On Windows, you might want to force OpenGL:
-
-```
-scrcpy --render-driver=opengl
-```
-
-You may also need to configure the [scaling behavior]:
+On older versions, you must configure the [scaling behavior]:
 
 > `scrcpy.exe` > Properties > Compatibility > Change high DPI settings >
 > Override high DPI scaling behavior > Scaling performed by: _Application_.
 
 [scaling behavior]: https://github.com/Genymobile/scrcpy/issues/40#issuecomment-424466723
+
+Also, to improve downscaling quality, trilinear filtering is enabled
+automatically if the renderer is OpenGL and if it supports mipmapping.
+
+On Windows, you might want to force OpenGL to enable mipmapping:
+
+```
+scrcpy --render-driver=opengl
+```
 
 
 ### Issue with Wayland
@@ -305,4 +315,4 @@ This FAQ is available in other languages:
 
  - [Italiano (Italiano, `it`) - v1.19](FAQ.it.md)
  - [한국어 (Korean, `ko`) - v1.11](FAQ.ko.md)
- - [简体中文 (Simplified Chinese, `zh-Hans`) - v1.18](FAQ.zh-Hans.md)
+ - [简体中文 (Simplified Chinese, `zh-Hans`) - v1.22](FAQ.zh-Hans.md)

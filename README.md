@@ -1,6 +1,6 @@
-# scrcpy (v1.22)
+# scrcpy (v1.23)
 
-<img src="data/icon.svg" width="128" height="128" alt="scrcpy" align="right" />
+<img src="app/data/icon.svg" width="128" height="128" alt="scrcpy" align="right" />
 
 _pronounced "**scr**een **c**o**py**"_
 
@@ -32,10 +32,8 @@ Its features include:
  - [configurable quality](#capture-configuration)
  - device screen [as a webcam (V4L2)](#v4l2loopback) (Linux-only)
  - [physical keyboard simulation (HID)](#physical-keyboard-simulation-hid)
-   (Linux-only)
  - [physical mouse simulation (HID)](#physical-mouse-simulation-hid)
-   (Linux-only)
- - [OTG mode](#otg) (Linux-only)
+ - [OTG mode](#otg)
  - and more…
 
 ## Requirements
@@ -108,10 +106,10 @@ process][BUILD_simple]).
 For Windows, for simplicity, a prebuilt archive with all the dependencies
 (including `adb`) is available:
 
- - [`scrcpy-win64-v1.22.zip`][direct-win64]  
-   _(SHA-256: ce4d9b8cc761e29862c4a72d8ad6f538bdd1f1831d15fd1f36633cd3b403db82)_
+ - [`scrcpy-win64-v1.23.zip`][direct-win64]  
+   _(SHA-256: d2f601b1d0157faf65153d8a093d827fd65aec5d5842d677ac86fb2b5b7704cc)_
 
-[direct-win64]: https://github.com/Genymobile/scrcpy/releases/download/v1.22/scrcpy-win64-v1.22.zip
+[direct-win64]: https://github.com/Genymobile/scrcpy/releases/download/v1.23/scrcpy-win64-v1.23.zip
 
 It is also available in [Chocolatey]:
 
@@ -214,6 +212,15 @@ scrcpy --max-fps 15
 ```
 
 This is officially supported since Android 10, but may work on earlier versions.
+
+The actual capture framerate may be printed to the console:
+
+```
+scrcpy --print-fps
+```
+
+It may also be enabled or disabled at any time with <kbd>MOD</kbd>+<kbd>i</kbd>.
+
 
 #### Crop
 
@@ -397,18 +404,30 @@ connect to the device before starting.
 Alternatively, it is possible to enable the TCP/IP connection manually using
 `adb`:
 
-1. Connect the device to the same Wi-Fi as your computer.
-2. Get your device IP address, in Settings → About phone → Status, or by
+1. Plug the device into a USB port on your computer.
+2. Connect the device to the same Wi-Fi network as your computer.
+3. Get your device IP address, in Settings → About phone → Status, or by
    executing this command:
 
     ```bash
     adb shell ip route | awk '{print $9}'
     ```
 
-3. Enable adb over TCP/IP on your device: `adb tcpip 5555`.
-4. Unplug your device.
-5. Connect to your device: `adb connect DEVICE_IP:5555` _(replace `DEVICE_IP`)_.
-6. Run `scrcpy` as usual.
+4. Enable adb over TCP/IP on your device: `adb tcpip 5555`.
+5. Unplug your device.
+6. Connect to your device: `adb connect DEVICE_IP:5555` _(replace `DEVICE_IP`
+with the device IP address you found)_.
+7. Run `scrcpy` as usual.
+
+Since Android 11, a [Wireless debugging option][adb-wireless] allows to bypass
+having to physically connect your device directly to your computer.
+
+[adb-wireless]: https://developer.android.com/studio/command-line/adb#connect-to-a-device-over-wi-fi-android-11+
+
+If the connection randomly drops, run your `scrcpy` command to reconnect. If it
+says there are no devices/emulators found, try running `adb connect
+DEVICE_IP:5555` again, and then `scrcpy` as usual. If it still says there are
+none found, try running `adb disconnect` and then run those two commands again.
 
 It may be useful to decrease the bit-rate and the definition:
 
@@ -422,7 +441,7 @@ scrcpy -b2M -m800  # short version
 
 #### Multi-devices
 
-If several devices are listed in `adb devices`, you must specify the _serial_:
+If several devices are listed in `adb devices`, you can specify the _serial_:
 
 ```bash
 scrcpy --serial 0123456789abcdef
@@ -434,6 +453,19 @@ If the device is connected over TCP/IP:
 ```bash
 scrcpy --serial 192.168.0.1:5555
 scrcpy -s 192.168.0.1:5555  # short version
+```
+
+If only one device is connected via either USB or TCP/IP, it is possible to
+select it automatically:
+
+```bash
+# Select the only device connected via USB
+scrcpy -d             # like adb -d
+scrcpy --select-usb   # long version
+
+# Select the only device connected via TCP/IP
+scrcpy -e             # like adb -e
+scrcpy --select-tcpip # long version
 ```
 
 You can start several instances of _scrcpy_ for several devices.
@@ -785,14 +817,17 @@ a location inverted through the center of the screen.
 By default, scrcpy uses Android key or text injection: it works everywhere, but
 is limited to ASCII.
 
-On Linux, scrcpy can simulate a physical USB keyboard on Android to provide a
-better input experience (using [USB HID over AOAv2][hid-aoav2]): the virtual
+Alternatively, scrcpy can simulate a physical USB keyboard on Android to provide
+a better input experience (using [USB HID over AOAv2][hid-aoav2]): the virtual
 keyboard is disabled and it works for all characters and IME.
 
 [hid-aoav2]: https://source.android.com/devices/accessories/aoa2#hid-support
 
-However, it only works if the device is connected by USB, and is currently only
-supported on Linux.
+However, it only works if the device is connected by USB.
+
+Note: On Windows, it may only work in [OTG mode](#otg), not while mirroring (it
+is not possible to open a USB device if it is already open by another process
+like the adb daemon).
 
 To enable this mode:
 
@@ -825,8 +860,7 @@ a physical keyboard is connected).
 #### Physical mouse simulation (HID)
 
 Similarly to the physical keyboard simulation, it is possible to simulate a
-physical mouse. Likewise, it only works if the device is connected by USB, and
-is currently only supported on Linux.
+physical mouse. Likewise, it only works if the device is connected by USB.
 
 By default, scrcpy uses Android mouse events injection, using absolute
 coordinates. By simulating a physical mouse, a mouse pointer appears on the
@@ -879,7 +913,7 @@ scrcpy --otg                             # keyboard and mouse
 ```
 
 Like `--hid-keyboard` and `--hid-mouse`, it only works if the device is
-connected by USB, and is currently only supported on Linux.
+connected by USB.
 
 
 #### Text injection preference
@@ -1071,7 +1105,9 @@ See [BUILD].
 
 ## Common issues
 
-See the [FAQ](FAQ.md).
+See the [FAQ].md).
+
+[FAQ]: FAQ.md
 
 
 ## Developers
@@ -1106,17 +1142,29 @@ Read the [developers page].
 [article-intro]: https://blog.rom1v.com/2018/03/introducing-scrcpy/
 [article-tcpip]: https://www.genymotion.com/blog/open-source-project-scrcpy-now-works-wirelessly/
 
+## Contact
+
+If you encounter a bug, please read the [FAQ] first, then open an [issue].
+
+[issue]: https://github.com/Genymobile/scrcpy/issues
+
+For general questions or discussions, you could also use:
+
+ - Reddit: [`r/scrcpy`](https://www.reddit.com/r/scrcpy)
+ - Twitter: [`@scrcpy_app`](https://twitter.com/scrcpy_app)
+
 ## Translations
 
 This README is available in other languages:
 
+- [Deutsch (German, `de`) - v1.22](README.de.md)
 - [Indonesian (Indonesia, `id`) - v1.16](README.id.md)
 - [Italiano (Italiano, `it`) - v1.19](README.it.md)
 - [日本語 (Japanese, `jp`) - v1.19](README.jp.md)
 - [한국어 (Korean, `ko`) - v1.11](README.ko.md)
 - [Português Brasileiro (Brazilian Portuguese, `pt-BR`) - v1.19](README.pt-br.md)
 - [Español (Spanish, `sp`) - v1.21](README.sp.md)
-- [简体中文 (Simplified Chinese, `zh-Hans`) - v1.21](README.zh-Hans.md)
+- [简体中文 (Simplified Chinese, `zh-Hans`) - v1.22](README.zh-Hans.md)
 - [繁體中文 (Traditional Chinese, `zh-Hant`) - v1.15](README.zh-Hant.md)
 - [Turkish (Turkish, `tr`) - v1.18](README.tr.md)
 

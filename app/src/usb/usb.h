@@ -22,6 +22,7 @@ struct sc_usb {
     sc_thread libusb_event_thread;
 
     atomic_bool stopped; // only used if cbs != NULL
+    atomic_flag disconnection_notified;
 };
 
 struct sc_usb_callbacks {
@@ -35,13 +36,26 @@ struct sc_usb_device {
     char *product;
     uint16_t vid;
     uint16_t pid;
+    bool selected;
 };
 
 void
 sc_usb_device_destroy(struct sc_usb_device *usb_device);
 
+/**
+ * Move src to dst
+ *
+ * After this call, the content of src is undefined, except that
+ * sc_usb_device_destroy() can be called.
+ *
+ * This is useful to take a device from a list that will be destroyed, without
+ * making unnecessary copies.
+ */
 void
-sc_usb_device_destroy_all(struct sc_usb_device *usb_devices, size_t count);
+sc_usb_device_move(struct sc_usb_device *dst, struct sc_usb_device *src);
+
+void
+sc_usb_devices_destroy_all(struct sc_usb_device *usb_devices, size_t count);
 
 bool
 sc_usb_init(struct sc_usb *usb);
@@ -49,9 +63,9 @@ sc_usb_init(struct sc_usb *usb);
 void
 sc_usb_destroy(struct sc_usb *usb);
 
-ssize_t
-sc_usb_find_devices(struct sc_usb *usb, const char *serial,
-                    struct sc_usb_device *devices, size_t len);
+bool
+sc_usb_select_device(struct sc_usb *usb, const char *serial,
+                     struct sc_usb_device *out_device);
 
 bool
 sc_usb_connect(struct sc_usb *usb, libusb_device *device,
@@ -59,6 +73,11 @@ sc_usb_connect(struct sc_usb *usb, libusb_device *device,
 
 void
 sc_usb_disconnect(struct sc_usb *usb);
+
+// A client should call this function with the return value of a libusb call
+// to detect disconnection immediately
+bool
+sc_usb_check_disconnected(struct sc_usb *usb, int result);
 
 void
 sc_usb_stop(struct sc_usb *usb);
