@@ -11,7 +11,7 @@
 #ninja -Cx
 
 make -f release.mk prepare-deps-win64
-imake -f release.mk build-win64
+make -f release.mk build-win64
 cd build-win64/app
 ls -l
 
