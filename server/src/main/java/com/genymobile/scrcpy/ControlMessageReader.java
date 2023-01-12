@@ -10,7 +10,7 @@ public class ControlMessageReader {
 
     static final int INJECT_KEYCODE_PAYLOAD_LENGTH = 13;
     static final int INJECT_TOUCH_EVENT_PAYLOAD_LENGTH = 27;
-    static final int INJECT_SCROLL_EVENT_PAYLOAD_LENGTH = 24;
+    static final int INJECT_SCROLL_EVENT_PAYLOAD_LENGTH = 20;
     static final int BACK_OR_SCREEN_ON_LENGTH = 1;
     static final int SET_SCREEN_POWER_MODE_PAYLOAD_LENGTH = 1;
     static final int GET_CLIPBOARD_LENGTH = 1;
@@ -104,7 +104,7 @@ public class ControlMessageReader {
         if (buffer.remaining() < INJECT_KEYCODE_PAYLOAD_LENGTH) {
             return null;
         }
-        int action = toUnsigned(buffer.get());
+        int action = Binary.toUnsigned(buffer.get());
         int keycode = buffer.getInt();
         int repeat = buffer.getInt();
         int metaState = buffer.getInt();
@@ -137,13 +137,10 @@ public class ControlMessageReader {
         if (buffer.remaining() < INJECT_TOUCH_EVENT_PAYLOAD_LENGTH) {
             return null;
         }
-        int action = toUnsigned(buffer.get());
+        int action = Binary.toUnsigned(buffer.get());
         long pointerId = buffer.getLong();
         Position position = readPosition(buffer);
-        // 16 bits fixed-point
-        int pressureInt = toUnsigned(buffer.getShort());
-        // convert it to a float between 0 and 1 (0x1p16f is 2^16 as float)
-        float pressure = pressureInt == 0xffff ? 1f : (pressureInt / 0x1p16f);
+        float pressure = Binary.u16FixedPointToFloat(buffer.getShort());
         int buttons = buffer.getInt();
         return ControlMessage.createInjectTouchEvent(action, pointerId, position, pressure, buttons);
     }
@@ -153,8 +150,8 @@ public class ControlMessageReader {
             return null;
         }
         Position position = readPosition(buffer);
-        int hScroll = buffer.getInt();
-        int vScroll = buffer.getInt();
+        float hScroll = Binary.i16FixedPointToFloat(buffer.getShort());
+        float vScroll = Binary.i16FixedPointToFloat(buffer.getShort());
         int buttons = buffer.getInt();
         return ControlMessage.createInjectScrollEvent(position, hScroll, vScroll, buttons);
     }
@@ -163,7 +160,7 @@ public class ControlMessageReader {
         if (buffer.remaining() < BACK_OR_SCREEN_ON_LENGTH) {
             return null;
         }
-        int action = toUnsigned(buffer.get());
+        int action = Binary.toUnsigned(buffer.get());
         return ControlMessage.createBackOrScreenOn(action);
     }
 
@@ -171,7 +168,7 @@ public class ControlMessageReader {
         if (buffer.remaining() < GET_CLIPBOARD_LENGTH) {
             return null;
         }
-        int copyKey = toUnsigned(buffer.get());
+        int copyKey = Binary.toUnsigned(buffer.get());
         return ControlMessage.createGetClipboard(copyKey);
     }
 
@@ -199,16 +196,8 @@ public class ControlMessageReader {
     private static Position readPosition(ByteBuffer buffer) {
         int x = buffer.getInt();
         int y = buffer.getInt();
-        int screenWidth = toUnsigned(buffer.getShort());
-        int screenHeight = toUnsigned(buffer.getShort());
+        int screenWidth = Binary.toUnsigned(buffer.getShort());
+        int screenHeight = Binary.toUnsigned(buffer.getShort());
         return new Position(x, y, screenWidth, screenHeight);
-    }
-
-    private static int toUnsigned(short value) {
-        return value & 0xffff;
-    }
-
-    private static int toUnsigned(byte value) {
-        return value & 0xff;
     }
 }

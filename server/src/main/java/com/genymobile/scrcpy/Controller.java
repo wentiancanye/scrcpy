@@ -16,6 +16,10 @@ public class Controller {
 
     private static final int DEFAULT_DEVICE_ID = 0;
 
+    // control_msg.h values of the pointerId field in inject_touch_event message
+    private static final int POINTER_ID_MOUSE = -1;
+    private static final int POINTER_ID_VIRTUAL_MOUSE = -3;
+
     private static final ScheduledExecutorService EXECUTOR = Executors.newSingleThreadScheduledExecutor();
 
     private final Device device;
@@ -197,7 +201,19 @@ public class Controller {
         pointer.setPressure(pressure);
         pointer.setUp(action == MotionEvent.ACTION_UP);
 
+        int source;
         int pointerCount = pointersState.update(pointerProperties, pointerCoords);
+        if (pointerId == POINTER_ID_MOUSE || pointerId == POINTER_ID_VIRTUAL_MOUSE) {
+            // real mouse event (forced by the client when --forward-on-click)
+            pointerProperties[pointerIndex].toolType = MotionEvent.TOOL_TYPE_MOUSE;
+            source = InputDevice.SOURCE_MOUSE;
+        } else {
+            // POINTER_ID_GENERIC_FINGER, POINTER_ID_VIRTUAL_FINGER or real touch from device
+            pointerProperties[pointerIndex].toolType = MotionEvent.TOOL_TYPE_FINGER;
+            source = InputDevice.SOURCE_TOUCHSCREEN;
+            // Buttons must not be set for touch events
+            buttons = 0;
+        }
 
         if (pointerCount == 1) {
             if (action == MotionEvent.ACTION_DOWN) {
@@ -212,21 +228,13 @@ public class Controller {
             }
         }
 
-        // Right-click and middle-click only work if the source is a mouse
-        boolean nonPrimaryButtonPressed = (buttons & ~MotionEvent.BUTTON_PRIMARY) != 0;
-        int source = nonPrimaryButtonPressed ? InputDevice.SOURCE_MOUSE : InputDevice.SOURCE_TOUCHSCREEN;
-        if (source != InputDevice.SOURCE_MOUSE) {
-            // Buttons must not be set for touch events
-            buttons = 0;
-        }
-
         MotionEvent event = MotionEvent
                 .obtain(lastTouchDown, now, action, pointerCount, pointerProperties, pointerCoords, 0, buttons, 1f, 1f, DEFAULT_DEVICE_ID, 0, source,
                         0);
         return device.injectEvent(event, Device.INJECT_MODE_ASYNC);
     }
 
-    private boolean injectScroll(Position position, int hScroll, int vScroll, int buttons) {
+    private boolean injectScroll(Position position, float hScroll, float vScroll, int buttons) {
         long now = SystemClock.uptimeMillis();
         Point point = device.getPhysicalPoint(position);
         if (point == null) {

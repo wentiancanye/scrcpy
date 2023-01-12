@@ -34,8 +34,8 @@ public final class ControlMessage {
     private long pointerId;
     private float pressure;
     private Position position;
-    private int hScroll;
-    private int vScroll;
+    private float hScroll;
+    private float vScroll;
     private int copyKey;
     private boolean paste;
     private int repeat;
@@ -72,7 +72,7 @@ public final class ControlMessage {
         return msg;
     }
 
-    public static ControlMessage createInjectScrollEvent(Position position, int hScroll, int vScroll, int buttons) {
+    public static ControlMessage createInjectScrollEvent(Position position, float hScroll, float vScroll, int buttons) {
         ControlMessage msg = new ControlMessage();
         msg.type = TYPE_INJECT_SCROLL_EVENT;
         msg.position = position;
@@ -157,11 +157,11 @@ public final class ControlMessage {
         return position;
     }
 
-    public int getHScroll() {
+    public float getHScroll() {
         return hScroll;
     }
 
-    public int getVScroll() {
+    public float getVScroll() {
         return vScroll;
     }
 
