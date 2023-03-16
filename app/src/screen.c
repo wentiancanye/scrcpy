@@ -7,7 +7,6 @@
 #include "events.h"
 #include "icon.h"
 #include "options.h"
-#include "video_buffer.h"
 #include "util/log.h"
 
 #define DISPLAY_MARGINS 96
@@ -240,7 +239,7 @@ sc_screen_update_content_rect(struct sc_screen *screen) {
     }
 }
 
-static inline SDL_Texture *
+static bool
 create_texture(struct sc_screen *screen) {
     SDL_Renderer *renderer = screen->renderer;
     struct sc_size size = screen->frame_size;
@@ -248,7 +247,8 @@ create_texture(struct sc_screen *screen) {
                                              SDL_TEXTUREACCESS_STREAMING,
                                              size.width, size.height);
     if (!texture) {
-        return NULL;
+        LOGE("Could not create texture: %s", SDL_GetError());
+        return false;
     }
 
     if (screen->mipmaps) {
@@ -264,7 +264,8 @@ create_texture(struct sc_screen *screen) {
         SDL_GL_UnbindTexture(texture);
     }
 
-    return texture;
+    screen->texture = texture;
+    return true;
 }
 
 // render the texture to the renderer
@@ -306,14 +307,13 @@ sc_screen_render(struct sc_screen *screen, bool update_content_rect) {
 }
 
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__WINDOWS__)
 # define CONTINUOUS_RESIZING_WORKAROUND
 #endif
 
 #ifdef CONTINUOUS_RESIZING_WORKAROUND
 // On Windows and MacOS, resizing blocks the event loop, so resizing events are
-// not triggered. On MacOS, as a workaround, handle them in an event handler
-// (it does not work for Windows unfortunately).
+// not triggered. As a workaround, handle them in an event handler.
 //
 // <https://bugzilla.libsdl.org/show_bug.cgi?id=2077>
 // <https://stackoverflow.com/a/40693139/1987178>
@@ -331,9 +331,31 @@ event_watcher(void *data, SDL_Event *event) {
 #endif
 
 static bool
-sc_screen_frame_sink_open(struct sc_frame_sink *sink) {
+sc_screen_frame_sink_open(struct sc_frame_sink *sink,
+                          const AVCodecContext *ctx) {
+    assert(ctx->pix_fmt == AV_PIX_FMT_YUV420P);
+    (void) ctx;
+
     struct sc_screen *screen = DOWNCAST(sink);
-    (void) screen;
+
+    assert(ctx->width > 0 && ctx->width <= 0xFFFF);
+    assert(ctx->height > 0 && ctx->height <= 0xFFFF);
+    // screen->frame_size is never used before the event is pushed, and the
+    // event acts as a memory barrier so it is safe without mutex
+    screen->frame_size.width = ctx->width;
+    screen->frame_size.height = ctx->height;
+
+    static SDL_Event event = {
+        .type = SC_EVENT_SCREEN_INIT_SIZE,
+    };
+
+    // Post the event on the UI thread (the texture must be created from there)
+    int ret = SDL_PushEvent(&event);
+    if (ret < 0) {
+        LOGW("Could not post init size event: %s", SDL_GetError());
+        return false;
+    }
+
 #ifndef NDEBUG
     screen->open = true;
 #endif
@@ -356,43 +378,31 @@ sc_screen_frame_sink_close(struct sc_frame_sink *sink) {
 static bool
 sc_screen_frame_sink_push(struct sc_frame_sink *sink, const AVFrame *frame) {
     struct sc_screen *screen = DOWNCAST(sink);
-    return sc_video_buffer_push(&screen->vb, frame);
-}
 
-static void
-sc_video_buffer_on_new_frame(struct sc_video_buffer *vb, bool previous_skipped,
-                             void *userdata) {
-    (void) vb;
-    struct sc_screen *screen = userdata;
-
-    // event_failed implies previous_skipped (the previous frame may not have
-    // been consumed if the event was not sent)
-    assert(!screen->event_failed || previous_skipped);
-
-    bool need_new_event;
-    if (previous_skipped) {
-        sc_fps_counter_add_skipped_frame(&screen->fps_counter);
-        // The EVENT_NEW_FRAME triggered for the previous frame will consume
-        // this new frame instead, unless the previous event failed
-        need_new_event = screen->event_failed;
-    } else {
-        need_new_event = true;
+    bool previous_skipped;
+    bool ok = sc_frame_buffer_push(&screen->fb, frame, &previous_skipped);
+    if (!ok) {
+        return false;
     }
 
-    if (need_new_event) {
+    if (previous_skipped) {
+        sc_fps_counter_add_skipped_frame(&screen->fps_counter);
+        // The SC_EVENT_NEW_FRAME triggered for the previous frame will consume
+        // this new frame instead
+    } else {
         static SDL_Event new_frame_event = {
-            .type = EVENT_NEW_FRAME,
+            .type = SC_EVENT_NEW_FRAME,
         };
 
         // Post the event on the UI thread
         int ret = SDL_PushEvent(&new_frame_event);
         if (ret < 0) {
             LOGW("Could not post new frame event: %s", SDL_GetError());
-            screen->event_failed = true;
-        } else {
-            screen->event_failed = false;
+            return false;
         }
     }
+
+    return true;
 }
 
 bool
@@ -402,7 +412,6 @@ sc_screen_init(struct sc_screen *screen,
     screen->has_frame = false;
     screen->fullscreen = false;
     screen->maximized = false;
-    screen->event_failed = false;
     screen->mouse_capture_key_pressed = 0;
 
     screen->req.x = params->window_x;
@@ -412,33 +421,19 @@ sc_screen_init(struct sc_screen *screen,
     screen->req.fullscreen = params->fullscreen;
     screen->req.start_fps_counter = params->start_fps_counter;
 
-    static const struct sc_video_buffer_callbacks cbs = {
-        .on_new_frame = sc_video_buffer_on_new_frame,
-    };
-
-    bool ok = sc_video_buffer_init(&screen->vb, params->buffering_time, &cbs,
-                                   screen);
+    bool ok = sc_frame_buffer_init(&screen->fb);
     if (!ok) {
         return false;
     }
 
-    ok = sc_video_buffer_start(&screen->vb);
-    if (!ok) {
-        goto error_destroy_video_buffer;
-    }
-
     if (!sc_fps_counter_init(&screen->fps_counter)) {
-        goto error_stop_and_join_video_buffer;
+        goto error_destroy_frame_buffer;
     }
 
-    screen->frame_size = params->frame_size;
     screen->rotation = params->rotation;
     if (screen->rotation) {
         LOGI("Initial display rotation set to %u", screen->rotation);
     }
-    struct sc_size content_size =
-        get_rotated_size(screen->frame_size, screen->rotation);
-    screen->content_size = content_size;
 
     uint32_t window_flags = SDL_WINDOW_HIDDEN
                           | SDL_WINDOW_RESIZABLE
@@ -506,18 +501,10 @@ sc_screen_init(struct sc_screen *screen,
         LOGW("Could not load icon");
     }
 
-    LOGI("Initial texture: %" PRIu16 "x%" PRIu16, params->frame_size.width,
-                                                  params->frame_size.height);
-    screen->texture = create_texture(screen);
-    if (!screen->texture) {
-        LOGE("Could not create texture: %s", SDL_GetError());
-        goto error_destroy_renderer;
-    }
-
     screen->frame = av_frame_alloc();
     if (!screen->frame) {
         LOG_OOM();
-        goto error_destroy_texture;
+        goto error_destroy_renderer;
     }
 
     struct sc_input_manager_params im_params = {
@@ -552,19 +539,14 @@ sc_screen_init(struct sc_screen *screen,
 
     return true;
 
-error_destroy_texture:
-    SDL_DestroyTexture(screen->texture);
 error_destroy_renderer:
     SDL_DestroyRenderer(screen->renderer);
 error_destroy_window:
     SDL_DestroyWindow(screen->window);
 error_destroy_fps_counter:
     sc_fps_counter_destroy(&screen->fps_counter);
-error_stop_and_join_video_buffer:
-    sc_video_buffer_stop(&screen->vb);
-    sc_video_buffer_join(&screen->vb);
-error_destroy_video_buffer:
-    sc_video_buffer_destroy(&screen->vb);
+error_destroy_frame_buffer:
+    sc_frame_buffer_destroy(&screen->fb);
 
     return false;
 }
@@ -601,13 +583,11 @@ sc_screen_hide_window(struct sc_screen *screen) {
 
 void
 sc_screen_interrupt(struct sc_screen *screen) {
-    sc_video_buffer_stop(&screen->vb);
     sc_fps_counter_interrupt(&screen->fps_counter);
 }
 
 void
 sc_screen_join(struct sc_screen *screen) {
-    sc_video_buffer_join(&screen->vb);
     sc_fps_counter_join(&screen->fps_counter);
 }
 
@@ -617,11 +597,13 @@ sc_screen_destroy(struct sc_screen *screen) {
     assert(!screen->open);
 #endif
     av_frame_free(&screen->frame);
-    SDL_DestroyTexture(screen->texture);
+    if (screen->texture) {
+        SDL_DestroyTexture(screen->texture);
+    }
     SDL_DestroyRenderer(screen->renderer);
     SDL_DestroyWindow(screen->window);
     sc_fps_counter_destroy(&screen->fps_counter);
-    sc_video_buffer_destroy(&screen->vb);
+    sc_frame_buffer_destroy(&screen->fb);
 }
 
 static void
@@ -681,6 +663,23 @@ sc_screen_set_rotation(struct sc_screen *screen, unsigned rotation) {
     sc_screen_render(screen, true);
 }
 
+static bool
+sc_screen_init_size(struct sc_screen *screen) {
+    // Before first frame
+    assert(!screen->has_frame);
+    assert(!screen->texture);
+
+    // The requested size is passed via screen->frame_size
+
+    struct sc_size content_size =
+        get_rotated_size(screen->frame_size, screen->rotation);
+    screen->content_size = content_size;
+
+    LOGI("Initial texture: %" PRIu16 "x%" PRIu16,
+                 screen->frame_size.width, screen->frame_size.height);
+    return create_texture(screen);
+}
+
 // recreate the texture and resize the window if the frame size has changed
 static bool
 prepare_for_frame(struct sc_screen *screen, struct sc_size new_frame_size) {
@@ -699,11 +698,7 @@ prepare_for_frame(struct sc_screen *screen, struct sc_size new_frame_size) {
 
         LOGI("New texture: %" PRIu16 "x%" PRIu16,
                      screen->frame_size.width, screen->frame_size.height);
-        screen->texture = create_texture(screen);
-        if (!screen->texture) {
-            LOGE("Could not create texture: %s", SDL_GetError());
-            return false;
-        }
+        return create_texture(screen);
     }
 
     return true;
@@ -727,7 +722,7 @@ update_texture(struct sc_screen *screen, const AVFrame *frame) {
 static bool
 sc_screen_update_frame(struct sc_screen *screen) {
     av_frame_unref(screen->frame);
-    sc_video_buffer_consume(&screen->vb, screen->frame);
+    sc_frame_buffer_consume(&screen->fb, screen->frame);
     AVFrame *frame = screen->frame;
 
     sc_fps_counter_add_rendered_frame(&screen->fps_counter);
@@ -816,22 +811,32 @@ sc_screen_is_mouse_capture_key(SDL_Keycode key) {
     return key == SDLK_LALT || key == SDLK_LGUI || key == SDLK_RGUI;
 }
 
-void
+bool
 sc_screen_handle_event(struct sc_screen *screen, SDL_Event *event) {
     bool relative_mode = sc_screen_is_relative_mode(screen);
 
     switch (event->type) {
-        case EVENT_NEW_FRAME: {
+        case SC_EVENT_SCREEN_INIT_SIZE: {
+            // The initial size is passed via screen->frame_size
+            bool ok = sc_screen_init_size(screen);
+            if (!ok) {
+                LOGE("Could not initialize screen size");
+                return false;
+            }
+            return true;
+        }
+        case SC_EVENT_NEW_FRAME: {
             bool ok = sc_screen_update_frame(screen);
             if (!ok) {
-                LOGW("Frame update failed\n");
+                LOGE("Frame update failed\n");
+                return false;
             }
-            return;
+            return true;
         }
         case SDL_WINDOWEVENT:
             if (!screen->has_frame) {
                 // Do nothing
-                return;
+                return true;
             }
             switch (event->window.event) {
                 case SDL_WINDOWEVENT_EXPOSED:
@@ -862,7 +867,7 @@ sc_screen_handle_event(struct sc_screen *screen, SDL_Event *event) {
                     }
                     break;
             }
-            return;
+            return true;
         case SDL_KEYDOWN:
             if (relative_mode) {
                 SDL_Keycode key = event->key.keysym.sym;
@@ -875,7 +880,7 @@ sc_screen_handle_event(struct sc_screen *screen, SDL_Event *event) {
                         screen->mouse_capture_key_pressed = 0;
                     }
                     // Mouse capture keys are never forwarded to the device
-                    return;
+                    return true;
                 }
             }
             break;
@@ -891,7 +896,7 @@ sc_screen_handle_event(struct sc_screen *screen, SDL_Event *event) {
                         sc_screen_toggle_mouse_capture(screen);
                     }
                     // Mouse capture keys are never forwarded to the device
-                    return;
+                    return true;
                 }
             }
             break;
@@ -901,7 +906,7 @@ sc_screen_handle_event(struct sc_screen *screen, SDL_Event *event) {
             if (relative_mode && !sc_screen_get_mouse_capture(screen)) {
                 // Do not forward to input manager, the mouse will be captured
                 // on SDL_MOUSEBUTTONUP
-                return;
+                return true;
             }
             break;
         case SDL_FINGERMOTION:
@@ -910,18 +915,19 @@ sc_screen_handle_event(struct sc_screen *screen, SDL_Event *event) {
             if (relative_mode) {
                 // Touch events are not compatible with relative mode
                 // (coordinates are not relative)
-                return;
+                return true;
             }
             break;
         case SDL_MOUSEBUTTONUP:
             if (relative_mode && !sc_screen_get_mouse_capture(screen)) {
                 sc_screen_set_mouse_capture(screen, true);
-                return;
+                return true;
             }
             break;
     }
 
     sc_input_manager_handle_event(&screen->im, event);
+    return true;
 }
 
 struct sc_point

@@ -5,9 +5,15 @@ import android.graphics.Rect;
 import java.util.List;
 
 public class Options {
+
     private Ln.Level logLevel = Ln.Level.DEBUG;
+    private int scid = -1; // 31-bit non-negative value, or -1
+    private boolean audio = true;
     private int maxSize;
-    private int bitRate = 8000000;
+    private VideoCodec videoCodec = VideoCodec.H264;
+    private AudioCodec audioCodec = AudioCodec.OPUS;
+    private int videoBitRate = 8000000;
+    private int audioBitRate = 128000;
     private int maxFps;
     private int lockVideoOrientation = -1;
     private boolean tunnelForward;
@@ -16,18 +22,25 @@ public class Options {
     private int displayId;
     private boolean showTouches;
     private boolean stayAwake;
-    private List<CodecOption> codecOptions;
-    private String encoderName;
+    private List<CodecOption> videoCodecOptions;
+    private List<CodecOption> audioCodecOptions;
+
+    private String videoEncoder;
+    private String audioEncoder;
     private boolean powerOffScreenOnClose;
     private boolean clipboardAutosync = true;
     private boolean downsizeOnError = true;
     private boolean cleanup = true;
     private boolean powerOn = true;
 
+    private boolean listEncoders;
+    private boolean listDisplays;
+
     // Options not used by the scrcpy client, but useful to use scrcpy-server directly
     private boolean sendDeviceMeta = true; // send device name and size
     private boolean sendFrameMeta = true; // send PTS so that the client may record properly
     private boolean sendDummyByte = true; // write a byte on start to detect connection issues
+    private boolean sendCodecMeta = true; // write the codec metadata before the stream
 
     public Ln.Level getLogLevel() {
         return logLevel;
@@ -35,6 +48,22 @@ public class Options {
 
     public void setLogLevel(Ln.Level logLevel) {
         this.logLevel = logLevel;
+    }
+
+    public int getScid() {
+        return scid;
+    }
+
+    public void setScid(int scid) {
+        this.scid = scid;
+    }
+
+    public boolean getAudio() {
+        return audio;
+    }
+
+    public void setAudio(boolean audio) {
+        this.audio = audio;
     }
 
     public int getMaxSize() {
@@ -45,12 +74,36 @@ public class Options {
         this.maxSize = maxSize;
     }
 
-    public int getBitRate() {
-        return bitRate;
+    public VideoCodec getVideoCodec() {
+        return videoCodec;
     }
 
-    public void setBitRate(int bitRate) {
-        this.bitRate = bitRate;
+    public void setVideoCodec(VideoCodec videoCodec) {
+        this.videoCodec = videoCodec;
+    }
+
+    public AudioCodec getAudioCodec() {
+        return audioCodec;
+    }
+
+    public void setAudioCodec(AudioCodec audioCodec) {
+        this.audioCodec = audioCodec;
+    }
+
+    public int getVideoBitRate() {
+        return videoBitRate;
+    }
+
+    public void setVideoBitRate(int videoBitRate) {
+        this.videoBitRate = videoBitRate;
+    }
+
+    public int getAudioBitRate() {
+        return audioBitRate;
+    }
+
+    public void setAudioBitRate(int audioBitRate) {
+        this.audioBitRate = audioBitRate;
     }
 
     public int getMaxFps() {
@@ -117,20 +170,36 @@ public class Options {
         this.stayAwake = stayAwake;
     }
 
-    public List<CodecOption> getCodecOptions() {
-        return codecOptions;
+    public List<CodecOption> getVideoCodecOptions() {
+        return videoCodecOptions;
     }
 
-    public void setCodecOptions(List<CodecOption> codecOptions) {
-        this.codecOptions = codecOptions;
+    public void setVideoCodecOptions(List<CodecOption> videoCodecOptions) {
+        this.videoCodecOptions = videoCodecOptions;
     }
 
-    public String getEncoderName() {
-        return encoderName;
+    public List<CodecOption> getAudioCodecOptions() {
+        return audioCodecOptions;
     }
 
-    public void setEncoderName(String encoderName) {
-        this.encoderName = encoderName;
+    public void setAudioCodecOptions(List<CodecOption> audioCodecOptions) {
+        this.audioCodecOptions = audioCodecOptions;
+    }
+
+    public String getVideoEncoder() {
+        return videoEncoder;
+    }
+
+    public void setVideoEncoder(String videoEncoder) {
+        this.videoEncoder = videoEncoder;
+    }
+
+    public String getAudioEncoder() {
+        return audioEncoder;
+    }
+
+    public void setAudioEncoder(String audioEncoder) {
+        this.audioEncoder = audioEncoder;
     }
 
     public void setPowerOffScreenOnClose(boolean powerOffScreenOnClose) {
@@ -173,6 +242,22 @@ public class Options {
         this.powerOn = powerOn;
     }
 
+    public boolean getListEncoders() {
+        return listEncoders;
+    }
+
+    public void setListEncoders(boolean listEncoders) {
+        this.listEncoders = listEncoders;
+    }
+
+    public boolean getListDisplays() {
+        return listDisplays;
+    }
+
+    public void setListDisplays(boolean listDisplays) {
+        this.listDisplays = listDisplays;
+    }
+
     public boolean getSendDeviceMeta() {
         return sendDeviceMeta;
     }
@@ -195,5 +280,13 @@ public class Options {
 
     public void setSendDummyByte(boolean sendDummyByte) {
         this.sendDummyByte = sendDummyByte;
+    }
+
+    public boolean getSendCodecMeta() {
+        return sendCodecMeta;
+    }
+
+    public void setSendCodecMeta(boolean sendCodecMeta) {
+        this.sendCodecMeta = sendCodecMeta;
     }
 }

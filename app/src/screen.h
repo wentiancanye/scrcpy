@@ -10,12 +10,12 @@
 #include "controller.h"
 #include "coords.h"
 #include "fps_counter.h"
+#include "frame_buffer.h"
 #include "input_manager.h"
 #include "opengl.h"
 #include "trait/key_processor.h"
 #include "trait/frame_sink.h"
 #include "trait/mouse_processor.h"
-#include "video_buffer.h"
 
 struct sc_screen {
     struct sc_frame_sink frame_sink; // frame sink trait
@@ -25,7 +25,7 @@ struct sc_screen {
 #endif
 
     struct sc_input_manager im;
-    struct sc_video_buffer vb;
+    struct sc_frame_buffer fb;
     struct sc_fps_counter fps_counter;
 
     // The initial requested window properties
@@ -59,8 +59,6 @@ struct sc_screen {
     bool maximized;
     bool mipmaps;
 
-    bool event_failed; // in case SDL_PushEvent() returned an error
-
     // To enable/disable mouse capture, a mouse capture key (LALT, LGUI or
     // RGUI) must be pressed. This variable tracks the pressed capture key.
     SDL_Keycode mouse_capture_key_pressed;
@@ -80,7 +78,6 @@ struct sc_screen_params {
     const struct sc_shortcut_mods *shortcut_mods;
 
     const char *window_title;
-    struct sc_size frame_size;
     bool always_on_top;
 
     int16_t window_x; // accepts SC_WINDOW_POSITION_UNDEFINED
@@ -95,8 +92,6 @@ struct sc_screen_params {
 
     bool fullscreen;
     bool start_fps_counter;
-
-    sc_tick buffering_time;
 };
 
 // initialize screen, create window, renderer and texture (window is hidden)
@@ -140,7 +135,8 @@ void
 sc_screen_set_rotation(struct sc_screen *screen, unsigned rotation);
 
 // react to SDL events
-void
+// If this function returns false, scrcpy must exit with an error.
+bool
 sc_screen_handle_event(struct sc_screen *screen, SDL_Event *event);
 
 // convert point from window coordinates to frame coordinates

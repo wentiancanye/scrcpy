@@ -2,28 +2,33 @@ _scrcpy() {
     local cur prev words cword
     local opts="
         --always-on-top
-        -b --bit-rate=
-        --codec-options=
+        --audio-bit-rate=
+        --audio-codec=
+        --audio-codec-options=
+        --audio-encoder=
+        -b --video-bit-rate=
         --crop=
         -d --select-usb
         --disable-screensaver
         --display=
         --display-buffer=
         -e --select-tcpip
-        --encoder=
         --force-adb-forward
         --forward-all-clicks
         -f --fullscreen
         -K --hid-keyboard
         -h --help
         --legacy-paste
+        --list-displays
+        --list-encoders
         --lock-video-orientation
         --lock-video-orientation=
         --max-fps=
         -M --hid-mouse
         -m --max-size=
+        --no-audio
         --no-cleanup
-        --no-clipboard-on-error
+        --no-clipboard-autosync
         --no-downsize-on-error
         -n --no-control
         -N --no-display
@@ -40,6 +45,7 @@ _scrcpy() {
         -r --record=
         --record-format=
         --render-driver=
+        --require-audio
         --rotation=
         -s --serial=
         --shortcut-mod=
@@ -53,6 +59,9 @@ _scrcpy() {
         --v4l2-sink=
         -V --verbosity=
         -v --version
+        --video-codec=
+        --video-codec-options=
+        --video-encoder=
         -w --stay-awake
         --window-borderless
         --window-title=
@@ -64,6 +73,14 @@ _scrcpy() {
     _init_completion -s || return
 
     case "$prev" in
+        --video-codec)
+            COMPREPLY=($(compgen -W 'h264 h265 av1' -- "$cur"))
+            return
+            ;;
+        --audio-codec)
+            COMPREPLY=($(compgen -W 'opus aac raw' -- "$cur"))
+            return
+            ;;
         --lock-video-orientation)
             COMPREPLY=($(compgen -W 'unlocked initial 0 1 2 3' -- "$cur"))
             return
@@ -98,7 +115,7 @@ _scrcpy() {
             COMPREPLY=($(compgen -W "$("${ADB:-adb}" devices | awk '$2 == "device" {print $1}')" -- ${cur}))
             return
             ;;
-        -b|--bitrate \
+        -b|--video-bit-rate \
         |--codec-options \
         |--crop \
         |--display \

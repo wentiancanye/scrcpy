@@ -1,11 +1,11 @@
 package com.genymobile.scrcpy;
 
 import android.graphics.Rect;
-import android.media.MediaCodecInfo;
 import android.os.BatteryManager;
 import android.os.Build;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -59,103 +59,109 @@ public final class Server {
         }
     }
 
-    private static void scrcpy(Options options) throws IOException {
+    private static void scrcpy(Options options) throws IOException, ConfigurationException {
         Ln.i("Device: " + Build.MANUFACTURER + " " + Build.MODEL + " (Android " + Build.VERSION.RELEASE + ")");
         final Device device = new Device(options);
-        List<CodecOption> codecOptions = options.getCodecOptions();
 
         Thread initThread = startInitThread(options);
 
+        int scid = options.getScid();
         boolean tunnelForward = options.isTunnelForward();
         boolean control = options.getControl();
+        boolean audio = options.getAudio();
         boolean sendDummyByte = options.getSendDummyByte();
 
-        try (DesktopConnection connection = DesktopConnection.open(tunnelForward, control, sendDummyByte)) {
+        Workarounds.prepareMainLooper();
+
+        // Workarounds must be applied for Meizu phones:
+        //  - <https://github.com/Genymobile/scrcpy/issues/240>
+        //  - <https://github.com/Genymobile/scrcpy/issues/365>
+        //  - <https://github.com/Genymobile/scrcpy/issues/2656>
+        //
+        // But only apply when strictly necessary, since workarounds can cause other issues:
+        //  - <https://github.com/Genymobile/scrcpy/issues/940>
+        //  - <https://github.com/Genymobile/scrcpy/issues/994>
+        boolean mustFillAppInfo = Build.BRAND.equalsIgnoreCase("meizu");
+
+        // Before Android 11, audio is not supported.
+        // Since Android 12, we can properly set a context on the AudioRecord.
+        // Only on Android 11 we must fill app info for the AudioRecord to work.
+        mustFillAppInfo |= audio && Build.VERSION.SDK_INT == Build.VERSION_CODES.R;
+
+        if (mustFillAppInfo) {
+            Workarounds.fillAppInfo();
+        }
+
+        List<AsyncProcessor> asyncProcessors = new ArrayList<>();
+
+        try (DesktopConnection connection = DesktopConnection.open(scid, tunnelForward, audio, control, sendDummyByte)) {
             if (options.getSendDeviceMeta()) {
-                Size videoSize = device.getScreenInfo().getVideoSize();
-                connection.sendDeviceMeta(Device.getDeviceName(), videoSize.getWidth(), videoSize.getHeight());
+                connection.sendDeviceMeta(Device.getDeviceName());
             }
-            ScreenEncoder screenEncoder = new ScreenEncoder(options.getSendFrameMeta(), options.getBitRate(), options.getMaxFps(), codecOptions,
-                    options.getEncoderName(), options.getDownsizeOnError());
 
-            Thread controllerThread = null;
-            Thread deviceMessageSenderThread = null;
             if (control) {
-                final Controller controller = new Controller(device, connection, options.getClipboardAutosync(), options.getPowerOn());
+                Controller controller = new Controller(device, connection, options.getClipboardAutosync(), options.getPowerOn());
+                device.setClipboardListener(text -> controller.getSender().pushClipboardText(text));
+                asyncProcessors.add(controller);
+            }
 
-                // asynchronous
-                controllerThread = startController(controller);
-                deviceMessageSenderThread = startDeviceMessageSender(controller.getSender());
+            if (audio) {
+                AudioCodec audioCodec = options.getAudioCodec();
+                Streamer audioStreamer = new Streamer(connection.getAudioFd(), audioCodec, options.getSendCodecMeta(),
+                        options.getSendFrameMeta());
+                AsyncProcessor audioRecorder;
+                if (audioCodec == AudioCodec.RAW) {
+                    audioRecorder = new AudioRawRecorder(audioStreamer);
+                } else {
+                    audioRecorder = new AudioEncoder(audioStreamer, options.getAudioBitRate(), options.getAudioCodecOptions(),
+                            options.getAudioEncoder());
+                }
+                asyncProcessors.add(audioRecorder);
+            }
 
-                device.setClipboardListener(new Device.ClipboardListener() {
-                    @Override
-                    public void onClipboardTextChanged(String text) {
-                        controller.getSender().pushClipboardText(text);
-                    }
-                });
+            Streamer videoStreamer = new Streamer(connection.getVideoFd(), options.getVideoCodec(), options.getSendCodecMeta(),
+                    options.getSendFrameMeta());
+            ScreenEncoder screenEncoder = new ScreenEncoder(device, videoStreamer, options.getVideoBitRate(), options.getMaxFps(),
+                    options.getVideoCodecOptions(), options.getVideoEncoder(), options.getDownsizeOnError());
+
+            for (AsyncProcessor asyncProcessor : asyncProcessors) {
+                asyncProcessor.start();
             }
 
             try {
                 // synchronous
-                screenEncoder.streamScreen(device, connection.getVideoFd());
+                screenEncoder.streamScreen();
             } catch (IOException e) {
-                // this is expected on close
-                Ln.d("Screen streaming stopped");
-            } finally {
-                initThread.interrupt();
-                if (controllerThread != null) {
-                    controllerThread.interrupt();
+                // Broken pipe is expected on close, because the socket is closed by the client
+                if (!IO.isBrokenPipe(e)) {
+                    Ln.e("Video encoding error", e);
                 }
-                if (deviceMessageSenderThread != null) {
-                    deviceMessageSenderThread.interrupt();
+            }
+        } finally {
+            Ln.d("Screen streaming stopped");
+            initThread.interrupt();
+            for (AsyncProcessor asyncProcessor : asyncProcessors) {
+                asyncProcessor.stop();
+            }
+
+            try {
+                initThread.join();
+                for (AsyncProcessor asyncProcessor : asyncProcessors) {
+                    asyncProcessor.join();
                 }
+            } catch (InterruptedException e) {
+                // ignore
             }
         }
     }
 
     private static Thread startInitThread(final Options options) {
-        Thread thread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                initAndCleanUp(options);
-            }
-        });
+        Thread thread = new Thread(() -> initAndCleanUp(options));
         thread.start();
         return thread;
     }
 
-    private static Thread startController(final Controller controller) {
-        Thread thread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    controller.control();
-                } catch (IOException e) {
-                    // this is expected on close
-                    Ln.d("Controller stopped");
-                }
-            }
-        });
-        thread.start();
-        return thread;
-    }
-
-    private static Thread startDeviceMessageSender(final DeviceMessageSender sender) {
-        Thread thread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    sender.loop();
-                } catch (IOException | InterruptedException e) {
-                    // this is expected on close
-                    Ln.d("Device message sender stopped");
-                }
-            }
-        });
-        thread.start();
-        return thread;
-    }
-
+    @SuppressWarnings("MethodLength")
     private static Options createOptions(String... args) {
         if (args.length < 1) {
             throw new IllegalArgumentException("Missing client version");
@@ -178,17 +184,46 @@ public final class Server {
             String key = arg.substring(0, equalIndex);
             String value = arg.substring(equalIndex + 1);
             switch (key) {
+                case "scid":
+                    int scid = Integer.parseInt(value, 0x10);
+                    if (scid < -1) {
+                        throw new IllegalArgumentException("scid may not be negative (except -1 for 'none'): " + scid);
+                    }
+                    options.setScid(scid);
+                    break;
                 case "log_level":
                     Ln.Level level = Ln.Level.valueOf(value.toUpperCase(Locale.ENGLISH));
                     options.setLogLevel(level);
+                    break;
+                case "audio":
+                    boolean audio = Boolean.parseBoolean(value);
+                    options.setAudio(audio);
+                    break;
+                case "video_codec":
+                    VideoCodec videoCodec = VideoCodec.findByName(value);
+                    if (videoCodec == null) {
+                        throw new IllegalArgumentException("Video codec " + value + " not supported");
+                    }
+                    options.setVideoCodec(videoCodec);
+                    break;
+                case "audio_codec":
+                    AudioCodec audioCodec = AudioCodec.findByName(value);
+                    if (audioCodec == null) {
+                        throw new IllegalArgumentException("Audio codec " + value + " not supported");
+                    }
+                    options.setAudioCodec(audioCodec);
                     break;
                 case "max_size":
                     int maxSize = Integer.parseInt(value) & ~7; // multiple of 8
                     options.setMaxSize(maxSize);
                     break;
-                case "bit_rate":
-                    int bitRate = Integer.parseInt(value);
-                    options.setBitRate(bitRate);
+                case "video_bit_rate":
+                    int videoBitRate = Integer.parseInt(value);
+                    options.setVideoBitRate(videoBitRate);
+                    break;
+                case "audio_bit_rate":
+                    int audioBitRate = Integer.parseInt(value);
+                    options.setAudioBitRate(audioBitRate);
                     break;
                 case "max_fps":
                     int maxFps = Integer.parseInt(value);
@@ -222,15 +257,23 @@ public final class Server {
                     boolean stayAwake = Boolean.parseBoolean(value);
                     options.setStayAwake(stayAwake);
                     break;
-                case "codec_options":
-                    List<CodecOption> codecOptions = CodecOption.parse(value);
-                    options.setCodecOptions(codecOptions);
+                case "video_codec_options":
+                    List<CodecOption> videoCodecOptions = CodecOption.parse(value);
+                    options.setVideoCodecOptions(videoCodecOptions);
                     break;
-                case "encoder_name":
+                case "audio_codec_options":
+                    List<CodecOption> audioCodecOptions = CodecOption.parse(value);
+                    options.setAudioCodecOptions(audioCodecOptions);
+                    break;
+                case "video_encoder":
                     if (!value.isEmpty()) {
-                        options.setEncoderName(value);
+                        options.setVideoEncoder(value);
                     }
                     break;
+                case "audio_encoder":
+                    if (!value.isEmpty()) {
+                        options.setAudioEncoder(value);
+                    }
                 case "power_off_on_close":
                     boolean powerOffScreenOnClose = Boolean.parseBoolean(value);
                     options.setPowerOffScreenOnClose(powerOffScreenOnClose);
@@ -251,6 +294,14 @@ public final class Server {
                     boolean powerOn = Boolean.parseBoolean(value);
                     options.setPowerOn(powerOn);
                     break;
+                case "list_encoders":
+                    boolean listEncoders = Boolean.parseBoolean(value);
+                    options.setListEncoders(listEncoders);
+                    break;
+                case "list_displays":
+                    boolean listDisplays = Boolean.parseBoolean(value);
+                    options.setListDisplays(listDisplays);
+                    break;
                 case "send_device_meta":
                     boolean sendDeviceMeta = Boolean.parseBoolean(value);
                     options.setSendDeviceMeta(sendDeviceMeta);
@@ -263,12 +314,17 @@ public final class Server {
                     boolean sendDummyByte = Boolean.parseBoolean(value);
                     options.setSendDummyByte(sendDummyByte);
                     break;
+                case "send_codec_meta":
+                    boolean sendCodecMeta = Boolean.parseBoolean(value);
+                    options.setSendCodecMeta(sendCodecMeta);
+                    break;
                 case "raw_video_stream":
                     boolean rawVideoStream = Boolean.parseBoolean(value);
                     if (rawVideoStream) {
                         options.setSendDeviceMeta(false);
                         options.setSendFrameMeta(false);
                         options.setSendDummyByte(false);
+                        options.setSendCodecMeta(false);
                     }
                     break;
                 default:
@@ -296,41 +352,35 @@ public final class Server {
         return new Rect(x, y, x + width, y + height);
     }
 
-    private static void suggestFix(Throwable e) {
-        if (e instanceof InvalidDisplayIdException) {
-            InvalidDisplayIdException idie = (InvalidDisplayIdException) e;
-            int[] displayIds = idie.getAvailableDisplayIds();
-            if (displayIds != null && displayIds.length > 0) {
-                Ln.e("Try to use one of the available display ids:");
-                for (int id : displayIds) {
-                    Ln.e("    scrcpy --display " + id);
-                }
-            }
-        } else if (e instanceof InvalidEncoderException) {
-            InvalidEncoderException iee = (InvalidEncoderException) e;
-            MediaCodecInfo[] encoders = iee.getAvailableEncoders();
-            if (encoders != null && encoders.length > 0) {
-                Ln.e("Try to use one of the available encoders:");
-                for (MediaCodecInfo encoder : encoders) {
-                    Ln.e("    scrcpy --encoder '" + encoder.getName() + "'");
-                }
-            }
-        }
-    }
-
     public static void main(String... args) throws Exception {
-        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
-            @Override
-            public void uncaughtException(Thread t, Throwable e) {
-                Ln.e("Exception on thread " + t, e);
-                suggestFix(e);
-            }
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            Ln.e("Exception on thread " + t, e);
         });
 
         Options options = createOptions(args);
 
         Ln.initLogLevel(options.getLogLevel());
 
-        scrcpy(options);
+        if (options.getListEncoders() || options.getListDisplays()) {
+            if (options.getCleanup()) {
+                CleanUp.unlinkSelf();
+            }
+
+            if (options.getListEncoders()) {
+                Ln.i(LogUtils.buildVideoEncoderListMessage());
+                Ln.i(LogUtils.buildAudioEncoderListMessage());
+            }
+            if (options.getListDisplays()) {
+                Ln.i(LogUtils.buildDisplayListMessage());
+            }
+            // Just print the requested data, do not mirror
+            return;
+        }
+
+        try {
+            scrcpy(options);
+        } catch (ConfigurationException e) {
+            // Do not print stack trace, a user-friendly error-message has already been logged
+        }
     }
 }
