@@ -24,14 +24,51 @@ To disable audio:
 scrcpy --no-audio
 ```
 
+To disable only the audio playback, see [no playback](video.md#no-playback).
+
+## Audio only
+
+To play audio only, disable the video:
+
+```bash
+scrcpy --no-video
+# interrupt with Ctrl+C
+```
+
+Without video, the audio latency is typically not criticial, so it might be
+interesting to add [buffering](#buffering) to minimize glitches:
+
+```
+scrcpy --no-video --audio-buffer=200
+```
+
+## Source
+
+By default, the device audio output is forwarded.
+
+It is possible to capture the device microphone instead:
+
+```
+scrcpy --audio-source=mic
+```
+
+For example, to use the device as a dictaphone and record a capture directly on
+the computer:
+
+```
+scrcpy --audio-source=mic --no-video --no-playback --record=file.opus
+```
+
+
 ## Codec
 
-The audio codec can be selected. The possible values are `opus` (default), `aac`
-and `raw` (uncompressed PCM 16-bit LE):
+The audio codec can be selected. The possible values are `opus` (default),
+`aac`, `flac` and `raw` (uncompressed PCM 16-bit LE):
 
 ```bash
 scrcpy --audio-codec=opus  # default
 scrcpy --audio-codec=aac
+scrcpy --audio-codec=flac
 scrcpy --audio-codec=raw
 ```
 
@@ -41,6 +78,20 @@ In particular, if you get the following error:
 
 then your device has no Opus encoder: try `scrcpy --audio-codec=aac`.
 
+For advanced usage, to pass arbitrary parameters to the [`MediaFormat`],
+check `--audio-codec-options` in the manpage or in `scrcpy --help`.
+
+For example, to change the [FLAC compression level]:
+
+```bash
+scrcpy --audio-codec=flac --audio-codec-options=flac-compression-level=8
+```
+
+[`MediaFormat`]: https://developer.android.com/reference/android/media/MediaFormat
+[FLAC compression level]: https://developer.android.com/reference/android/media/MediaFormat#KEY_FLAC_COMPRESSION_LEVEL
+
+
+## Encoder
 
 Several encoders may be available on the device. They can be listed by:
 
@@ -50,19 +101,14 @@ scrcpy --list-encoders
 
 To select a specific encoder:
 
-```
+```bash
 scrcpy --audio-codec=opus --audio-encoder='c2.android.opus.encoder'
 ```
-
-For advanced usage, to pass arbitrary parameters to the [`MediaFormat`],
-check `--audio-codec-options` in the manpage or in `scrcpy --help`.
-
-[`MediaFormat`]: https://developer.android.com/reference/android/media/MediaFormat
 
 
 ## Bit rate
 
-The default video bit-rate is 128Kbps. To change it:
+The default audio bit rate is 128Kbps. To change it:
 
 ```bash
 scrcpy --audio-bit-rate=64K
@@ -95,3 +141,14 @@ avoid glitches and smooth the playback:
 ```
 scrcpy --display-buffer=200 --audio-buffer=200
 ```
+
+It is also possible to configure another audio buffer (the audio output buffer),
+by default set to 5ms. Don't change it, unless you get some [robotic and glitchy
+sound][#3793]:
+
+```bash
+# Only if absolutely necessary
+scrcpy --audio-output-buffer=10
+```
+
+[#3793]: https://github.com/Genymobile/scrcpy/issues/3793

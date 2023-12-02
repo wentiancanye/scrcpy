@@ -84,7 +84,8 @@ public class Controller implements AsyncProcessor {
         }
     }
 
-    public void start() {
+    @Override
+    public void start(TerminationListener listener) {
         thread = new Thread(() -> {
             try {
                 control();
@@ -92,12 +93,14 @@ public class Controller implements AsyncProcessor {
                 // this is expected on close
             } finally {
                 Ln.d("Controller stopped");
+                listener.onTerminated(true);
             }
-        });
+        }, "control-recv");
         thread.start();
         sender.start();
     }
 
+    @Override
     public void stop() {
         if (thread != null) {
             thread.interrupt();
@@ -105,6 +108,7 @@ public class Controller implements AsyncProcessor {
         sender.stop();
     }
 
+    @Override
     public void join() throws InterruptedException {
         if (thread != null) {
             thread.join();
@@ -317,9 +321,8 @@ public class Controller implements AsyncProcessor {
             }
         }
 
-        MotionEvent event = MotionEvent
-                .obtain(lastTouchDown, now, action, pointerCount, pointerProperties, pointerCoords, 0, buttons, 1f, 1f, DEFAULT_DEVICE_ID, 0, source,
-                        0);
+        MotionEvent event = MotionEvent.obtain(lastTouchDown, now, action, pointerCount, pointerProperties, pointerCoords, 0, buttons, 1f, 1f,
+                DEFAULT_DEVICE_ID, 0, source, 0);
         return device.injectEvent(event, Device.INJECT_MODE_ASYNC);
     }
 
@@ -340,9 +343,8 @@ public class Controller implements AsyncProcessor {
         coords.setAxisValue(MotionEvent.AXIS_HSCROLL, hScroll);
         coords.setAxisValue(MotionEvent.AXIS_VSCROLL, vScroll);
 
-        MotionEvent event = MotionEvent
-                .obtain(lastTouchDown, now, MotionEvent.ACTION_SCROLL, 1, pointerProperties, pointerCoords, 0, buttons, 1f, 1f, DEFAULT_DEVICE_ID, 0,
-                        InputDevice.SOURCE_MOUSE, 0);
+        MotionEvent event = MotionEvent.obtain(lastTouchDown, now, MotionEvent.ACTION_SCROLL, 1, pointerProperties, pointerCoords, 0, buttons, 1f, 1f,
+                DEFAULT_DEVICE_ID, 0, InputDevice.SOURCE_MOUSE, 0);
         return device.injectEvent(event, Device.INJECT_MODE_ASYNC);
     }
 

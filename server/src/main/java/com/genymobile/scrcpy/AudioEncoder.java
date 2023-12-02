@@ -37,9 +37,7 @@ public final class AudioEncoder implements AsyncProcessor {
     private static final int SAMPLE_RATE = AudioCapture.SAMPLE_RATE;
     private static final int CHANNELS = AudioCapture.CHANNELS;
 
-    private static final int READ_MS = 5; // milliseconds
-    private static final int READ_SIZE = AudioCapture.millisToBytes(READ_MS);
-
+    private final AudioCapture capture;
     private final Streamer streamer;
     private final int bitRate;
     private final List<CodecOption> codecOptions;
@@ -58,7 +56,8 @@ public final class AudioEncoder implements AsyncProcessor {
 
     private boolean ended;
 
-    public AudioEncoder(Streamer streamer, int bitRate, List<CodecOption> codecOptions, String encoderName) {
+    public AudioEncoder(AudioCapture capture, Streamer streamer, int bitRate, List<CodecOption> codecOptions, String encoderName) {
+        this.capture = capture;
         this.streamer = streamer;
         this.bitRate = bitRate;
         this.codecOptions = codecOptions;
@@ -91,8 +90,8 @@ public final class AudioEncoder implements AsyncProcessor {
         while (!Thread.currentThread().isInterrupted()) {
             InputTask task = inputTasks.take();
             ByteBuffer buffer = mediaCodec.getInputBuffer(task.index);
-            int r = capture.read(buffer, READ_SIZE, bufferInfo);
-            if (r < 0) {
+            int r = capture.read(buffer, bufferInfo);
+            if (r <= 0) {
                 throw new IOException("Could not read audio: " + r);
             }
 
@@ -114,21 +113,29 @@ public final class AudioEncoder implements AsyncProcessor {
         }
     }
 
-    public void start() {
+    @Override
+    public void start(TerminationListener listener) {
         thread = new Thread(() -> {
+            boolean fatalError = false;
             try {
                 encode();
-            } catch (ConfigurationException | AudioCaptureForegroundException e) {
+            } catch (ConfigurationException e) {
+                // Do not print stack trace, a user-friendly error-message has already been logged
+                fatalError = true;
+            } catch (AudioCaptureForegroundException e) {
                 // Do not print stack trace, a user-friendly error-message has already been logged
             } catch (IOException e) {
                 Ln.e("Audio encoding error", e);
+                fatalError = true;
             } finally {
                 Ln.d("Audio encoder stopped");
+                listener.onTerminated(fatalError);
             }
-        });
+        }, "audio-encoder");
         thread.start();
     }
 
+    @Override
     public void stop() {
         if (thread != null) {
             // Just wake up the blocking wait from the thread, so that it properly releases all its resources and terminates
@@ -136,6 +143,7 @@ public final class AudioEncoder implements AsyncProcessor {
         }
     }
 
+    @Override
     public void join() throws InterruptedException {
         if (thread != null) {
             thread.join();
@@ -166,14 +174,13 @@ public final class AudioEncoder implements AsyncProcessor {
         }
 
         MediaCodec mediaCodec = null;
-        AudioCapture capture = new AudioCapture();
 
         boolean mediaCodecStarted = false;
         try {
             Codec codec = streamer.getCodec();
             mediaCodec = createMediaCodec(codec, encoderName);
 
-            mediaCodecThread = new HandlerThread("AudioEncoder");
+            mediaCodecThread = new HandlerThread("media-codec");
             mediaCodecThread.start();
 
             MediaFormat format = createFormat(codec.getMimeType(), bitRate, codecOptions);
@@ -183,16 +190,15 @@ public final class AudioEncoder implements AsyncProcessor {
             capture.start();
 
             final MediaCodec mediaCodecRef = mediaCodec;
-            final AudioCapture captureRef = capture;
             inputThread = new Thread(() -> {
                 try {
-                    inputThread(mediaCodecRef, captureRef);
+                    inputThread(mediaCodecRef, capture);
                 } catch (IOException | InterruptedException e) {
                     Ln.e("Audio capture error", e);
                 } finally {
                     end();
                 }
-            });
+            }, "audio-in");
 
             outputThread = new Thread(() -> {
                 try {
@@ -207,7 +213,7 @@ public final class AudioEncoder implements AsyncProcessor {
                 } finally {
                     end();
                 }
-            });
+            }, "audio-out");
 
             mediaCodec.start();
             mediaCodecStarted = true;
@@ -271,16 +277,25 @@ public final class AudioEncoder implements AsyncProcessor {
             try {
                 return MediaCodec.createByCodecName(encoderName);
             } catch (IllegalArgumentException e) {
-                Ln.e("Encoder '" + encoderName + "' for " + codec.getName() + " not found\n" + LogUtils.buildAudioEncoderListMessage());
+                Ln.e("Audio encoder '" + encoderName + "' for " + codec.getName() + " not found\n" + LogUtils.buildAudioEncoderListMessage());
                 throw new ConfigurationException("Unknown encoder: " + encoderName);
+            } catch (IOException e) {
+                Ln.e("Could not create audio encoder '" + encoderName + "' for " + codec.getName() + "\n" + LogUtils.buildAudioEncoderListMessage());
+                throw e;
             }
         }
-        MediaCodec mediaCodec = MediaCodec.createEncoderByType(codec.getMimeType());
-        Ln.d("Using audio encoder: '" + mediaCodec.getName() + "'");
-        return mediaCodec;
+
+        try {
+            MediaCodec mediaCodec = MediaCodec.createEncoderByType(codec.getMimeType());
+            Ln.d("Using audio encoder: '" + mediaCodec.getName() + "'");
+            return mediaCodec;
+        } catch (IOException | IllegalArgumentException e) {
+            Ln.e("Could not create default audio encoder for " + codec.getName() + "\n" + LogUtils.buildAudioEncoderListMessage());
+            throw e;
+        }
     }
 
-    private class EncoderCallback extends MediaCodec.Callback {
+    private final class EncoderCallback extends MediaCodec.Callback {
         @TargetApi(Build.VERSION_CODES.N)
         @Override
         public void onInputBufferAvailable(MediaCodec codec, int index) {

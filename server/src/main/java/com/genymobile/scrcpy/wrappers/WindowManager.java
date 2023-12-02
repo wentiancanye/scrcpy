@@ -2,7 +2,9 @@ package com.genymobile.scrcpy.wrappers;
 
 import com.genymobile.scrcpy.Ln;
 
+import android.annotation.TargetApi;
 import android.os.IInterface;
+import android.view.IDisplayFoldListener;
 import android.view.IRotationWatcher;
 
 import java.lang.reflect.InvocationTargetException;
@@ -105,7 +107,17 @@ public final class WindowManager {
                 cls.getMethod("watchRotation", IRotationWatcher.class).invoke(manager, rotationWatcher);
             }
         } catch (Exception e) {
-            throw new AssertionError(e);
+            Ln.e("Could not register rotation watcher", e);
+        }
+    }
+
+    @TargetApi(29)
+    public void registerDisplayFoldListener(IDisplayFoldListener foldListener) {
+        try {
+            Class<?> cls = manager.getClass();
+            cls.getMethod("registerDisplayFoldListener", IDisplayFoldListener.class).invoke(manager, foldListener);
+        } catch (Exception e) {
+            Ln.e("Could not register display fold listener", e);
         }
     }
 }

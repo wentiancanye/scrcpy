@@ -25,7 +25,8 @@ sc_demuxer_to_avcodec_id(uint32_t codec_id) {
 #define SC_CODEC_ID_H265 UINT32_C(0x68323635) // "h265" in ASCII
 #define SC_CODEC_ID_AV1 UINT32_C(0x00617631) // "av1" in ASCII
 #define SC_CODEC_ID_OPUS UINT32_C(0x6f707573) // "opus" in ASCII
-#define SC_CODEC_ID_AAC UINT32_C(0x00616163) // "aac in ASCII"
+#define SC_CODEC_ID_AAC UINT32_C(0x00616163) // "aac" in ASCII
+#define SC_CODEC_ID_FLAC UINT32_C(0x666c6163) // "flac" in ASCII
 #define SC_CODEC_ID_RAW UINT32_C(0x00726177) // "raw" in ASCII
     switch (codec_id) {
         case SC_CODEC_ID_H264:
@@ -33,11 +34,18 @@ sc_demuxer_to_avcodec_id(uint32_t codec_id) {
         case SC_CODEC_ID_H265:
             return AV_CODEC_ID_HEVC;
         case SC_CODEC_ID_AV1:
+#ifdef SCRCPY_LAVC_HAS_AV1
             return AV_CODEC_ID_AV1;
+#else
+            LOGE("AV1 not supported by this FFmpeg version");
+            return AV_CODEC_ID_NONE;
+#endif
         case SC_CODEC_ID_OPUS:
             return AV_CODEC_ID_OPUS;
         case SC_CODEC_ID_AAC:
             return AV_CODEC_ID_AAC;
+        case SC_CODEC_ID_FLAC:
+            return AV_CODEC_ID_FLAC;
         case SC_CODEC_ID_RAW:
             return AV_CODEC_ID_PCM_S16LE;
         default:
@@ -74,9 +82,8 @@ sc_demuxer_recv_video_size(struct sc_demuxer *demuxer, uint32_t *width,
 
 static bool
 sc_demuxer_recv_packet(struct sc_demuxer *demuxer, AVPacket *packet) {
-    // The video stream contains raw packets, without time information. When we
-    // record, we retrieve the timestamps separately, from a "meta" header
-    // added by the server before each raw packet.
+    // The video and audio streams contain a sequence of raw packets (as
+    // provided by MediaCodec), each prefixed with a "meta" header.
     //
     // The "meta" header length is 12 bytes:
     // [. . . . . . . .|. . . .]. . . . . . . . . . . . . . . ...
@@ -203,6 +210,11 @@ run_demuxer(void *data) {
         codec_ctx->channels = 2;
 #endif
         codec_ctx->sample_rate = 48000;
+
+        if (raw_codec_id == SC_CODEC_ID_FLAC) {
+            // The sample_fmt is not set by the FLAC decoder
+            codec_ctx->sample_fmt = AV_SAMPLE_FMT_S16;
+        }
     }
 
     if (avcodec_open2(codec_ctx, codec, NULL) < 0) {
@@ -215,8 +227,9 @@ run_demuxer(void *data) {
     }
 
     // Config packets must be merged with the next non-config packet only for
-    // video streams
-    bool must_merge_config_packet = codec->type == AVMEDIA_TYPE_VIDEO;
+    // H.26x
+    bool must_merge_config_packet = raw_codec_id == SC_CODEC_ID_H264
+                                 || raw_codec_id == SC_CODEC_ID_H265;
 
     struct sc_packet_merger merger;
 

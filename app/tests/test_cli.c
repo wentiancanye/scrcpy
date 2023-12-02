@@ -53,7 +53,7 @@ static void test_options(void) {
         "--max-size", "1024",
         "--lock-video-orientation=2", // optional arguments require '='
         // "--no-control" is not compatible with "--turn-screen-off"
-        // "--no-display" is not compatible with "--fulscreen"
+        // "--no-playback" is not compatible with "--fulscreen"
         "--port", "1234:1236",
         "--push-target", "/sdcard/Movies",
         "--record", "file",
@@ -108,8 +108,8 @@ static void test_options2(void) {
     char *argv[] = {
         "scrcpy",
         "--no-control",
-        "--no-display",
-        "--record", "file.mp4", // cannot enable --no-display without recording
+        "--no-playback",
+        "--record", "file.mp4", // cannot enable --no-playback without recording
     };
 
     bool ok = scrcpy_parse_args(&args, ARRAY_LEN(argv), argv);
@@ -117,7 +117,8 @@ static void test_options2(void) {
 
     const struct scrcpy_options *opts = &args.opts;
     assert(!opts->control);
-    assert(!opts->display);
+    assert(!opts->video_playback);
+    assert(!opts->audio_playback);
     assert(!strcmp(opts->record_filename, "file.mp4"));
     assert(opts->record_format == SC_RECORD_FORMAT_MP4);
 }

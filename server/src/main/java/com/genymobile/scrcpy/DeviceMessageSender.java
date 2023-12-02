@@ -51,6 +51,7 @@ public final class DeviceMessageSender {
             }
         }
     }
+
     public void start() {
         thread = new Thread(() -> {
             try {
@@ -60,7 +61,7 @@ public final class DeviceMessageSender {
             } finally {
                 Ln.d("Device message sender stopped");
             }
-        });
+        }, "control-send");
         thread.start();
     }
 

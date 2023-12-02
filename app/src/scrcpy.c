@@ -35,6 +35,7 @@
 #include "util/log.h"
 #include "util/net.h"
 #include "util/rand.h"
+#include "util/timeout.h"
 #ifdef HAVE_V4L2
 # include "v4l2_sink.h"
 #endif
@@ -73,6 +74,7 @@ struct scrcpy {
         struct sc_hid_mouse mouse_hid;
 #endif
     };
+    struct sc_timeout timeout;
 };
 
 static inline void
@@ -88,7 +90,7 @@ push_event(uint32_t type, const char *name) {
 #define PUSH_EVENT(TYPE) push_event(TYPE, # TYPE)
 
 #ifdef _WIN32
-BOOL WINAPI windows_ctrl_handler(DWORD ctrl_type) {
+static BOOL WINAPI windows_ctrl_handler(DWORD ctrl_type) {
     if (ctrl_type == CTRL_C_EVENT) {
         PUSH_EVENT(SDL_QUIT);
         return TRUE;
@@ -137,7 +139,7 @@ sdl_set_hints(const char *render_driver) {
 }
 
 static void
-sdl_configure(bool display, bool disable_screensaver) {
+sdl_configure(bool video_playback, bool disable_screensaver) {
 #ifdef _WIN32
     // Clean up properly on Ctrl+C on Windows
     bool ok = SetConsoleCtrlHandler(windows_ctrl_handler, TRUE);
@@ -146,7 +148,7 @@ sdl_configure(bool display, bool disable_screensaver) {
     }
 #endif // _WIN32
 
-    if (!display) {
+    if (!video_playback) {
         return;
     }
 
@@ -171,6 +173,9 @@ event_loop(struct scrcpy *s) {
             case SC_EVENT_RECORDER_ERROR:
                 LOGE("Recorder error");
                 return SCRCPY_EXIT_FAILURE;
+            case SC_EVENT_TIME_LIMIT_REACHED:
+                LOGI("Time limit reached");
+                return SCRCPY_EXIT_SUCCESS;
             case SDL_QUIT:
                 LOGD("User requested to quit");
                 return SCRCPY_EXIT_SUCCESS;
@@ -247,7 +252,9 @@ sc_audio_demuxer_on_ended(struct sc_demuxer *demuxer,
 
     // Contrary to the video demuxer, keep mirroring if only the audio fails
     // (unless --require-audio is set).
-    if (status == SC_DEMUXER_STATUS_ERROR
+    if (status == SC_DEMUXER_STATUS_EOS) {
+        PUSH_EVENT(SC_EVENT_DEVICE_DISCONNECTED);
+    } else if (status == SC_DEMUXER_STATUS_ERROR
             || (status == SC_DEMUXER_STATUS_DISABLED
                 && options->require_audio)) {
         PUSH_EVENT(SC_EVENT_DEMUXER_ERROR);
@@ -280,9 +287,17 @@ sc_server_on_disconnected(struct sc_server *server, void *userdata) {
     // event
 }
 
+static void
+sc_timeout_on_timeout(struct sc_timeout *timeout, void *userdata) {
+    (void) timeout;
+    (void) userdata;
+
+    PUSH_EVENT(SC_EVENT_TIME_LIMIT_REACHED);
+}
+
 // Generate a scrcpy id to differentiate multiple running scrcpy instances
 static uint32_t
-scrcpy_generate_scid() {
+scrcpy_generate_scid(void) {
     struct sc_rand rand;
     sc_rand_init(&rand);
     // Only use 31 bits to avoid issues with signed values on the Java-side
@@ -321,6 +336,8 @@ scrcpy(struct scrcpy_options *options) {
     bool controller_initialized = false;
     bool controller_started = false;
     bool screen_initialized = false;
+    bool timeout_initialized = false;
+    bool timeout_started = false;
 
     struct sc_acksync *acksync = NULL;
 
@@ -334,6 +351,9 @@ scrcpy(struct scrcpy_options *options) {
         .log_level = options->log_level,
         .video_codec = options->video_codec,
         .audio_codec = options->audio_codec,
+        .video_source = options->video_source,
+        .audio_source = options->audio_source,
+        .camera_facing = options->camera_facing,
         .crop = options->crop,
         .port_range = options->port_range,
         .tunnel_host = options->tunnel_host,
@@ -345,6 +365,7 @@ scrcpy(struct scrcpy_options *options) {
         .lock_video_orientation = options->lock_video_orientation,
         .control = options->control,
         .display_id = options->display_id,
+        .video = options->video,
         .audio = options->audio,
         .show_touches = options->show_touches,
         .stay_awake = options->stay_awake,
@@ -352,6 +373,10 @@ scrcpy(struct scrcpy_options *options) {
         .audio_codec_options = options->audio_codec_options,
         .video_encoder = options->video_encoder,
         .audio_encoder = options->audio_encoder,
+        .camera_id = options->camera_id,
+        .camera_size = options->camera_size,
+        .camera_ar = options->camera_ar,
+        .camera_fps = options->camera_fps,
         .force_adb_forward = options->force_adb_forward,
         .power_off_on_close = options->power_off_on_close,
         .clipboard_autosync = options->clipboard_autosync,
@@ -360,8 +385,9 @@ scrcpy(struct scrcpy_options *options) {
         .tcpip_dst = options->tcpip_dst,
         .cleanup = options->cleanup,
         .power_on = options->power_on,
-        .list_encoders = options->list_encoders,
-        .list_displays = options->list_displays,
+        .kill_adb_on_close = options->kill_adb_on_close,
+        .camera_high_speed = options->camera_high_speed,
+        .list = options->list,
     };
 
     static const struct sc_server_callbacks cbs = {
@@ -379,30 +405,45 @@ scrcpy(struct scrcpy_options *options) {
 
     server_started = true;
 
-    if (options->list_encoders || options->list_displays) {
+    if (options->list) {
         bool ok = await_for_server(NULL);
         ret = ok ? SCRCPY_EXIT_SUCCESS : SCRCPY_EXIT_FAILURE;
         goto end;
     }
 
-    if (options->display) {
+    // playback implies capture
+    assert(!options->video_playback || options->video);
+    assert(!options->audio_playback || options->audio);
+
+    if (options->video_playback) {
         sdl_set_hints(options->render_driver);
     }
 
-    // Initialize SDL video in addition if display is enabled
-    if (options->display) {
+    if (options->video_playback ||
+            (options->control && options->clipboard_autosync)) {
+        // Initialize the video subsystem even if --no-video or
+        // --no-video-playback is passed so that clipboard synchronization
+        // still works.
+        // <https://github.com/Genymobile/scrcpy/issues/4418>
         if (SDL_Init(SDL_INIT_VIDEO)) {
-            LOGE("Could not initialize SDL video: %s", SDL_GetError());
-            goto end;
+            // If it fails, it is an error only if video playback is enabled
+            if (options->video_playback) {
+                LOGE("Could not initialize SDL video: %s", SDL_GetError());
+                goto end;
+            } else {
+                LOGW("Could not initialize SDL video: %s", SDL_GetError());
+            }
         }
+    }
 
-        if (options->audio && SDL_Init(SDL_INIT_AUDIO)) {
+    if (options->audio_playback) {
+        if (SDL_Init(SDL_INIT_AUDIO)) {
             LOGE("Could not initialize SDL audio: %s", SDL_GetError());
             goto end;
         }
     }
 
-    sdl_configure(options->display, options->disable_screensaver);
+    sdl_configure(options->video_playback, options->disable_screensaver);
 
     // Await for server without blocking Ctrl+C handling
     bool connected;
@@ -428,7 +469,7 @@ scrcpy(struct scrcpy_options *options) {
 
     struct sc_file_pusher *fp = NULL;
 
-    if (options->display && options->control) {
+    if (options->video_playback && options->control) {
         if (!sc_file_pusher_init(&s->file_pusher, serial,
                                  options->push_target)) {
             goto end;
@@ -437,11 +478,13 @@ scrcpy(struct scrcpy_options *options) {
         file_pusher_initialized = true;
     }
 
-    static const struct sc_demuxer_callbacks video_demuxer_cbs = {
-        .on_ended = sc_video_demuxer_on_ended,
-    };
-    sc_demuxer_init(&s->video_demuxer, "video", s->server.video_socket,
-                    &video_demuxer_cbs, NULL);
+    if (options->video) {
+        static const struct sc_demuxer_callbacks video_demuxer_cbs = {
+            .on_ended = sc_video_demuxer_on_ended,
+        };
+        sc_demuxer_init(&s->video_demuxer, "video", s->server.video_socket,
+                        &video_demuxer_cbs, NULL);
+    }
 
     if (options->audio) {
         static const struct sc_demuxer_callbacks audio_demuxer_cbs = {
@@ -451,8 +494,8 @@ scrcpy(struct scrcpy_options *options) {
                         &audio_demuxer_cbs, options);
     }
 
-    bool needs_video_decoder = options->display;
-    bool needs_audio_decoder = options->audio && options->display;
+    bool needs_video_decoder = options->video_playback;
+    bool needs_audio_decoder = options->audio_playback;
 #ifdef HAVE_V4L2
     needs_video_decoder |= !!options->v4l2_device;
 #endif
@@ -472,7 +515,8 @@ scrcpy(struct scrcpy_options *options) {
             .on_ended = sc_recorder_on_ended,
         };
         if (!sc_recorder_init(&s->recorder, options->record_filename,
-                              options->record_format, options->audio,
+                              options->record_format, options->video,
+                              options->audio, options->record_orientation,
                               &recorder_cbs, NULL)) {
             goto end;
         }
@@ -483,8 +527,10 @@ scrcpy(struct scrcpy_options *options) {
         }
         recorder_started = true;
 
-        sc_packet_source_add_sink(&s->video_demuxer.packet_source,
-                                  &s->recorder.video_packet_sink);
+        if (options->video) {
+            sc_packet_source_add_sink(&s->video_demuxer.packet_source,
+                                      &s->recorder.video_packet_sink);
+        }
         if (options->audio) {
             sc_packet_source_add_sink(&s->audio_demuxer.packet_source,
                                       &s->recorder.audio_packet_sink);
@@ -630,23 +676,12 @@ aoa_hid_end:
         }
         controller_started = true;
         controller = &s->controller;
-
-        if (options->turn_screen_off) {
-            struct sc_control_msg msg;
-            msg.type = SC_CONTROL_MSG_TYPE_SET_SCREEN_POWER_MODE;
-            msg.set_screen_power_mode.mode = SC_SCREEN_POWER_MODE_OFF;
-
-            if (!sc_controller_push_msg(&s->controller, &msg)) {
-                LOGW("Could not request 'set screen power mode'");
-            }
-        }
-
     }
 
     // There is a controller if and only if control is enabled
     assert(options->control == !!controller);
 
-    if (options->display) {
+    if (options->video_playback) {
         const char *window_title =
             options->window_title ? options->window_title : info->device_name;
 
@@ -666,16 +701,11 @@ aoa_hid_end:
             .window_width = options->window_width,
             .window_height = options->window_height,
             .window_borderless = options->window_borderless,
-            .rotation = options->rotation,
+            .orientation = options->display_orientation,
             .mipmaps = options->mipmaps,
             .fullscreen = options->fullscreen,
             .start_fps_counter = options->start_fps_counter,
         };
-
-        if (!sc_screen_init(&s->screen, &screen_params)) {
-            goto end;
-        }
-        screen_initialized = true;
 
         struct sc_frame_source *src = &s->video_decoder.frame_source;
         if (options->display_buffer) {
@@ -685,13 +715,19 @@ aoa_hid_end:
             src = &s->display_buffer.frame_source;
         }
 
-        sc_frame_source_add_sink(src, &s->screen.frame_sink);
-
-        if (options->audio) {
-            sc_audio_player_init(&s->audio_player, options->audio_buffer);
-            sc_frame_source_add_sink(&s->audio_decoder.frame_source,
-                                     &s->audio_player.frame_sink);
+        if (!sc_screen_init(&s->screen, &screen_params)) {
+            goto end;
         }
+        screen_initialized = true;
+
+        sc_frame_source_add_sink(src, &s->screen.frame_sink);
+    }
+
+    if (options->audio_playback) {
+        sc_audio_player_init(&s->audio_player, options->audio_buffer,
+                             options->audio_output_buffer);
+        sc_frame_source_add_sink(&s->audio_decoder.frame_source,
+                                 &s->audio_player.frame_sink);
     }
 
 #ifdef HAVE_V4L2
@@ -713,18 +749,54 @@ aoa_hid_end:
     }
 #endif
 
-    // now we consumed the header values, the socket receives the video stream
-    // start the video demuxer
-    if (!sc_demuxer_start(&s->video_demuxer)) {
-        goto end;
+    // Now that the header values have been consumed, the socket(s) will
+    // receive the stream(s). Start the demuxer(s).
+
+    if (options->video) {
+        if (!sc_demuxer_start(&s->video_demuxer)) {
+            goto end;
+        }
+        video_demuxer_started = true;
     }
-    video_demuxer_started = true;
 
     if (options->audio) {
         if (!sc_demuxer_start(&s->audio_demuxer)) {
             goto end;
         }
         audio_demuxer_started = true;
+    }
+
+    // If the device screen is to be turned off, send the control message after
+    // everything is set up
+    if (options->control && options->turn_screen_off) {
+        struct sc_control_msg msg;
+        msg.type = SC_CONTROL_MSG_TYPE_SET_SCREEN_POWER_MODE;
+        msg.set_screen_power_mode.mode = SC_SCREEN_POWER_MODE_OFF;
+
+        if (!sc_controller_push_msg(&s->controller, &msg)) {
+            LOGW("Could not request 'set screen power mode'");
+        }
+    }
+
+    if (options->time_limit) {
+        bool ok = sc_timeout_init(&s->timeout);
+        if (!ok) {
+            goto end;
+        }
+
+        timeout_initialized = true;
+
+        sc_tick deadline = sc_tick_now() + options->time_limit;
+        static const struct sc_timeout_callbacks cbs = {
+            .on_timeout = sc_timeout_on_timeout,
+        };
+
+        ok = sc_timeout_start(&s->timeout, deadline, &cbs, NULL);
+        if (!ok) {
+            goto end;
+        }
+
+        timeout_started = true;
     }
 
     ret = event_loop(s);
@@ -735,6 +807,10 @@ aoa_hid_end:
     sc_screen_hide_window(&s->screen);
 
 end:
+    if (timeout_started) {
+        sc_timeout_stop(&s->timeout);
+    }
+
     // The demuxer is not stopped explicitly, because it will stop by itself on
     // end-of-stream
 #ifdef HAVE_USB
@@ -768,6 +844,13 @@ end:
     if (server_started) {
         // shutdown the sockets and kill the server
         sc_server_stop(&s->server);
+    }
+
+    if (timeout_started) {
+        sc_timeout_join(&s->timeout);
+    }
+    if (timeout_initialized) {
+        sc_timeout_destroy(&s->timeout);
     }
 
     // now that the sockets are shutdown, the demuxer and controller are

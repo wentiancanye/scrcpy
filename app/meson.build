@@ -14,6 +14,7 @@ src = [
     'src/delay_buffer.c',
     'src/demuxer.c',
     'src/device_msg.c',
+    'src/display.c',
     'src/icon.c',
     'src/file_pusher.c',
     'src/fps_counter.c',
@@ -50,6 +51,7 @@ src = [
     'src/util/term.c',
     'src/util/thread.c',
     'src/util/tick.c',
+    'src/util/timeout.c',
 ]
 
 conf = configuration_data()
@@ -96,77 +98,24 @@ endif
 
 cc = meson.get_compiler('c')
 
-crossbuild_windows = meson.is_cross_build() and host_machine.system() == 'windows'
+dependencies = [
+    dependency('libavformat', version: '>= 57.33'),
+    dependency('libavcodec', version: '>= 57.37'),
+    dependency('libavutil'),
+    dependency('libswresample'),
+    dependency('sdl2', version: '>= 2.0.5'),
+]
 
-if not crossbuild_windows
+if v4l2_support
+    dependencies += dependency('libavdevice')
+endif
 
-    # native build
-    dependencies = [
-        dependency('libavformat', version: '>= 57.33'),
-        dependency('libavcodec', version: '>= 57.37'),
-        dependency('libavutil'),
-        dependency('libswresample'),
-        dependency('sdl2', version: '>= 2.0.5'),
-    ]
-
-    if v4l2_support
-        dependencies += dependency('libavdevice')
-    endif
-
-    if usb_support
-        dependencies += dependency('libusb-1.0')
-    endif
-
-else
-    # cross-compile mingw32 build (from Linux to Windows)
-    prebuilt_sdl2 = meson.get_cross_property('prebuilt_sdl2')
-    sdl2_bin_dir = meson.current_source_dir() + '/prebuilt-deps/data/' + prebuilt_sdl2 + '/bin'
-    sdl2_lib_dir = meson.current_source_dir() + '/prebuilt-deps/data/' + prebuilt_sdl2 + '/lib'
-    sdl2_include_dir = 'prebuilt-deps/data/' + prebuilt_sdl2 + '/include'
-
-    sdl2 = declare_dependency(
-        dependencies: [
-            cc.find_library('SDL2', dirs: sdl2_bin_dir),
-            cc.find_library('SDL2main', dirs: sdl2_lib_dir),
-        ],
-        include_directories: include_directories(sdl2_include_dir)
-    )
-
-    prebuilt_ffmpeg = meson.get_cross_property('prebuilt_ffmpeg')
-    ffmpeg_bin_dir = meson.current_source_dir() + '/prebuilt-deps/data/' + prebuilt_ffmpeg + '/bin'
-    ffmpeg_include_dir = 'prebuilt-deps/data/' + prebuilt_ffmpeg + '/include'
-
-    ffmpeg = declare_dependency(
-        dependencies: [
-            cc.find_library('avcodec-60', dirs: ffmpeg_bin_dir),
-            cc.find_library('avformat-60', dirs: ffmpeg_bin_dir),
-            cc.find_library('avutil-58', dirs: ffmpeg_bin_dir),
-            cc.find_library('swresample-4', dirs: ffmpeg_bin_dir),
-        ],
-        include_directories: include_directories(ffmpeg_include_dir)
-    )
-
-    prebuilt_libusb = meson.get_cross_property('prebuilt_libusb')
-    libusb_bin_dir = meson.current_source_dir() + '/prebuilt-deps/data/' + prebuilt_libusb + '/bin'
-    libusb_include_dir = 'prebuilt-deps/data/' + prebuilt_libusb + '/include'
-
-    libusb = declare_dependency(
-        dependencies: [
-            cc.find_library('msys-usb-1.0', dirs: libusb_bin_dir),
-        ],
-        include_directories: include_directories(libusb_include_dir)
-    )
-
-    dependencies = [
-        ffmpeg,
-        sdl2,
-        libusb,
-        cc.find_library('mingw32')
-    ]
-
+if usb_support
+    dependencies += dependency('libusb-1.0')
 endif
 
 if host_machine.system() == 'windows'
+    dependencies += cc.find_library('mingw32')
     dependencies += cc.find_library('ws2_32')
 endif
 
@@ -277,10 +226,6 @@ if get_option('buildtype') == 'debug'
             'src/util/strbuf.c',
             'src/util/term.c',
         ]],
-        ['test_clock', [
-            'tests/test_clock.c',
-            'src/clock.c',
-        ]],
         ['test_control_msg_serialize', [
             'tests/test_control_msg_serialize.c',
             'src/control_msg.c',
@@ -290,6 +235,10 @@ if get_option('buildtype') == 'debug'
         ['test_device_msg_deserialize', [
             'tests/test_device_msg_deserialize.c',
             'src/device_msg.c',
+        ]],
+        ['test_orientation', [
+            'tests/test_orientation.c',
+            'src/options.c',
         ]],
         ['test_strbuf', [
             'tests/test_strbuf.c',
@@ -310,7 +259,8 @@ if get_option('buildtype') == 'debug'
     ]
 
     foreach t : tests
-        exe = executable(t[0], t[1],
+        sources = t[1] + ['src/compat.c']
+        exe = executable(t[0], sources,
                          include_directories: src_dir,
                          dependencies: dependencies,
                          c_args: ['-DSDL_MAIN_HANDLED', '-DSC_TEST'])

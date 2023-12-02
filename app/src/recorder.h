@@ -14,6 +14,11 @@
 
 struct sc_recorder_queue SC_VECDEQUE(AVPacket *);
 
+struct sc_recorder_stream {
+    int index;
+    int64_t last_pts;
+};
+
 struct sc_recorder {
     struct sc_packet_sink video_packet_sink;
     struct sc_packet_sink audio_packet_sink;
@@ -27,6 +32,9 @@ struct sc_recorder {
      * may access it without data races.
      */
     bool audio;
+    bool video;
+
+    enum sc_orientation orientation;
 
     char *filename;
     enum sc_record_format format;
@@ -34,19 +42,20 @@ struct sc_recorder {
 
     sc_thread thread;
     sc_mutex mutex;
-    sc_cond queue_cond;
+    sc_cond cond;
     // set on sc_recorder_stop(), packet_sink close or recording failure
     bool stopped;
     struct sc_recorder_queue video_queue;
     struct sc_recorder_queue audio_queue;
 
     // wake up the recorder thread once the video or audio codec is known
-    sc_cond stream_cond;
     bool video_init;
     bool audio_init;
 
-    int video_stream_index;
-    int audio_stream_index;
+    bool audio_expects_config_packet;
+
+    struct sc_recorder_stream video_stream;
+    struct sc_recorder_stream audio_stream;
 
     const struct sc_recorder_callbacks *cbs;
     void *cbs_userdata;
@@ -59,7 +68,8 @@ struct sc_recorder_callbacks {
 
 bool
 sc_recorder_init(struct sc_recorder *recorder, const char *filename,
-                 enum sc_record_format format, bool audio,
+                 enum sc_record_format format, bool video, bool audio,
+                 enum sc_orientation orientation,
                  const struct sc_recorder_callbacks *cbs, void *cbs_userdata);
 
 bool

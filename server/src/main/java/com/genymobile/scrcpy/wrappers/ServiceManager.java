@@ -1,9 +1,14 @@
 package com.genymobile.scrcpy.wrappers;
 
+import com.genymobile.scrcpy.FakeContext;
+
 import android.annotation.SuppressLint;
+import android.content.Context;
+import android.hardware.camera2.CameraManager;
 import android.os.IBinder;
 import android.os.IInterface;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
@@ -11,6 +16,7 @@ import java.lang.reflect.Method;
 public final class ServiceManager {
 
     private static final Method GET_SERVICE_METHOD;
+
     static {
         try {
             GET_SERVICE_METHOD = Class.forName("android.os.ServiceManager").getDeclaredMethod("getService", String.class);
@@ -26,6 +32,7 @@ public final class ServiceManager {
     private static StatusBarManager statusBarManager;
     private static ClipboardManager clipboardManager;
     private static ActivityManager activityManager;
+    private static CameraManager cameraManager;
 
     private ServiceManager() {
         /* not instantiable */
@@ -62,11 +69,21 @@ public final class ServiceManager {
         return displayManager;
     }
 
+    public static Class<?> getInputManagerClass() {
+        try {
+            // Parts of the InputManager class have been moved to a new InputManagerGlobal class in Android 14 preview
+            return Class.forName("android.hardware.input.InputManagerGlobal");
+        } catch (ClassNotFoundException e) {
+            return android.hardware.input.InputManager.class;
+        }
+    }
+
     public static InputManager getInputManager() {
         if (inputManager == null) {
             try {
-                Method getInstanceMethod = android.hardware.input.InputManager.class.getDeclaredMethod("getInstance");
-                android.hardware.input.InputManager im = (android.hardware.input.InputManager) getInstanceMethod.invoke(null);
+                Class<?> inputManagerClass = getInputManagerClass();
+                Method getInstanceMethod = inputManagerClass.getDeclaredMethod("getInstance");
+                Object im = getInstanceMethod.invoke(null);
                 inputManager = new InputManager(im);
             } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
                 throw new AssertionError(e);
@@ -118,5 +135,17 @@ public final class ServiceManager {
         }
 
         return activityManager;
+    }
+
+    public static CameraManager getCameraManager() {
+        if (cameraManager == null) {
+            try {
+                Constructor<CameraManager> ctor = CameraManager.class.getDeclaredConstructor(Context.class);
+                cameraManager = ctor.newInstance(FakeContext.get());
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        }
+        return cameraManager;
     }
 }

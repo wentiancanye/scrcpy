@@ -269,21 +269,25 @@ static void test_parse_integer_with_suffix(void) {
 
     char buf[32];
 
-    sprintf(buf, "%ldk", LONG_MAX / 2000);
+    int r = snprintf(buf, sizeof(buf), "%ldk", LONG_MAX / 2000);
+    assert(r >= 0 && (size_t) r < sizeof(buf));
     ok = sc_str_parse_integer_with_suffix(buf, &value);
     assert(ok);
     assert(value == LONG_MAX / 2000 * 1000);
 
-    sprintf(buf, "%ldm", LONG_MAX / 2000);
+    r = snprintf(buf, sizeof(buf), "%ldm", LONG_MAX / 2000);
+    assert(r >= 0 && (size_t) r < sizeof(buf));
     ok = sc_str_parse_integer_with_suffix(buf, &value);
     assert(!ok);
 
-    sprintf(buf, "%ldk", LONG_MIN / 2000);
+    r = snprintf(buf, sizeof(buf), "%ldk", LONG_MIN / 2000);
+    assert(r >= 0 && (size_t) r < sizeof(buf));
     ok = sc_str_parse_integer_with_suffix(buf, &value);
     assert(ok);
     assert(value == LONG_MIN / 2000 * 1000);
 
-    sprintf(buf, "%ldm", LONG_MIN / 2000);
+    r = snprintf(buf, sizeof(buf), "%ldm", LONG_MIN / 2000);
+    assert(r >= 0 && (size_t) r < sizeof(buf));
     ok = sc_str_parse_integer_with_suffix(buf, &value);
     assert(!ok);
 }
@@ -358,7 +362,7 @@ static void test_index_of_column(void) {
     assert(sc_str_index_of_column("  a bc  d", 1, " ") == 2);
 }
 
-static void test_remove_trailing_cr() {
+static void test_remove_trailing_cr(void) {
     char s[] = "abc\r";
     sc_str_remove_trailing_cr(s, sizeof(s) - 1);
     assert(!strcmp(s, "abc"));
