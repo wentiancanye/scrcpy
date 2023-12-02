@@ -10,6 +10,11 @@
 #meson x --buildtype release --strip -Db_lto=true -Dcrossbuild_windows=true --cross-file=cross_win64.txt -Dcompile_server=false -Dcompile_app=true -Dportable=true
 #ninja -Cx
 
+# 如果报错找不到 pkg-config 或其他的，时因为meson版本低了
+# 运行下面的命令：
+#sudo apt remove -y meson
+#sudo pip3 install --upgrade meson
+
 make -f release.mk prepare-deps-win64
 make -f release.mk build-win64
 cd build-win64/app
