@@ -2,7 +2,7 @@
 source for the project. Do not download releases from random websites, even if
 their name contains `scrcpy`.**
 
-# scrcpy (v2.4)
+# scrcpy (v3.0)
 
 <img src="app/data/icon.svg" width="128" height="128" alt="scrcpy" align="right" />
 
@@ -31,12 +31,14 @@ It focuses on:
 Its features include:
  - [audio forwarding](doc/audio.md) (Android 11+)
  - [recording](doc/recording.md)
+ - [virtual display](doc/virtual_display.md)
  - mirroring with [Android device screen off](doc/device.md#turn-screen-off)
  - [copy-paste](doc/control.md#copy-paste) in both directions
  - [configurable quality](doc/video.md)
  - [camera mirroring](doc/camera.md) (Android 12+)
  - [mirroring as a webcam (V4L2)](doc/v4l2.md) (Linux-only)
  - physical [keyboard][hid-keyboard] and [mouse][hid-mouse] simulation (HID)
+ - [gamepad](doc/gamepad.md) support
  - [OTG mode](doc/otg.md)
  - and more…
 
@@ -53,10 +55,16 @@ Make sure you [enabled USB debugging][enable-adb] on your device(s).
 
 [enable-adb]: https://developer.android.com/studio/debug/dev-options#enable
 
-On some devices, you also need to enable [an additional option][control] `USB
-debugging (Security Settings)` (this is an item different from `USB debugging`)
-to control it using a keyboard and mouse. Rebooting the device is necessary once
-this option is set.
+On some devices (especially Xiaomi), you might get the following error:
+
+```
+java.lang.SecurityException: Injecting input events requires the caller (or the source of the instrumentation, if any) to have the INJECT_EVENTS permission.
+```
+
+In that case, you need to enable [an additional option][control] `USB debugging
+(Security Settings)` (this is an item different from `USB debugging`) to control
+it using a keyboard and mouse. Rebooting the device is necessary once this
+option is set.
 
 [control]: https://github.com/Genymobile/scrcpy/issues/70#issuecomment-373286323
 
@@ -66,7 +74,7 @@ Note that USB debugging is not required to run scrcpy in [OTG mode](doc/otg.md).
 ## Get the app
 
  - [Linux](doc/linux.md)
- - [Windows](doc/windows.md)
+ - [Windows](doc/windows.md) (read [how to run](doc/windows.md#run))
  - [macOS](doc/macos.md)
 
 
@@ -82,6 +90,12 @@ Here are just some common examples.
     ```bash
     scrcpy --video-codec=h265 --max-size=1920 --max-fps=60 --no-audio --keyboard=uhid
     scrcpy --video-codec=h265 -m1920 --max-fps=60 --no-audio -K  # short version
+    ```
+
+ - Start VLC in a new virtual display (separate from the device display):
+
+    ```bash
+    scrcpy --new-display=1920x1080 --start-app=org.videolan.vlc
     ```
 
  - Record the device camera in H.265 at 1920x1080 (and microphone) to an MP4
@@ -105,6 +119,13 @@ Here are just some common examples.
     scrcpy --otg
     ```
 
+ - Control the device using gamepad controllers plugged into the computer:
+
+    ```bash
+    scrcpy --gamepad=uhid
+    scrcpy -G  # short version
+    ```
+
 ## User documentation
 
 The application provides a lot of features and configuration options. They are
@@ -116,9 +137,11 @@ documented in the following pages:
  - [Control](doc/control.md)
  - [Keyboard](doc/keyboard.md)
  - [Mouse](doc/mouse.md)
+ - [Gamepad](doc/gamepad.md)
  - [Device](doc/device.md)
  - [Window](doc/window.md)
  - [Recording](doc/recording.md)
+ - [Virtual display](doc/virtual_display.md)
  - [Tunnels](doc/tunnels.md)
  - [OTG](doc/otg.md)
  - [Camera](doc/camera.md)
@@ -148,13 +171,17 @@ documented in the following pages:
 
 ## Contact
 
-If you encounter a bug, please read the [FAQ](FAQ.md) first, then open an [issue].
+You can open an [issue] for bug reports, feature requests or general questions.
+
+For bug reports, please read the [FAQ](FAQ.md) first, you might find a solution
+to your problem immediately.
 
 [issue]: https://github.com/Genymobile/scrcpy/issues
 
-For general questions or discussions, you can also use:
+You can also use:
 
  - Reddit: [`r/scrcpy`](https://www.reddit.com/r/scrcpy)
+ - BlueSky: [`@scrcpy.bsky.social`](https://bsky.app/profile/scrcpy.bsky.social)
  - Twitter: [`@scrcpy_app`](https://twitter.com/scrcpy_app)
 
 

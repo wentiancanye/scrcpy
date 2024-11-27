@@ -8,22 +8,25 @@
 
 #include "keyboard_aoa.h"
 #include "mouse_aoa.h"
+#include "mouse_capture.h"
+#include "gamepad_aoa.h"
 
 struct sc_screen_otg {
     struct sc_keyboard_aoa *keyboard;
     struct sc_mouse_aoa *mouse;
+    struct sc_gamepad_aoa *gamepad;
 
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *texture;
 
-    // See equivalent mechanism in screen.h
-    SDL_Keycode mouse_capture_key_pressed;
+    struct sc_mouse_capture mc;
 };
 
 struct sc_screen_otg_params {
     struct sc_keyboard_aoa *keyboard;
     struct sc_mouse_aoa *mouse;
+    struct sc_gamepad_aoa *gamepad;
 
     const char *window_title;
     bool always_on_top;
@@ -32,6 +35,7 @@ struct sc_screen_otg_params {
     uint16_t window_width;
     uint16_t window_height;
     bool window_borderless;
+    uint8_t shortcut_mods; // OR of enum sc_shortcut_mod values
 };
 
 bool

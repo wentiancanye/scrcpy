@@ -21,9 +21,9 @@ the client and on the server.
 If video is enabled, then the server sends a raw video stream (H.264 by default)
 of the device screen, with some additional headers for each packet. The client
 decodes the video frames, and displays them as soon as possible, without
-buffering (unless `--display-buffer=delay` is specified) to minimize latency.
-The client is not aware of the device rotation (which is handled by the server),
-it just knows the dimensions of the video frames it receives.
+buffering (unless `--video-buffer=delay` is specified) to minimize latency. The
+client is not aware of the device rotation (which is handled by the server), it
+just knows the dimensions of the video frames it receives.
 
 Similarly, if audio is enabled, then the server sends a raw audio stream (OPUS
 by default) of the device audio output (or the microphone if
@@ -461,26 +461,30 @@ meson setup x -Dserver_debugger=true
 meson configure x -Dserver_debugger=true
 ```
 
-If your device runs Android 8 or below, set the `server_debugger_method` to
-`old` in addition:
+Then recompile, and run scrcpy.
 
-```bash
-meson setup x -Dserver_debugger=true -Dserver_debugger_method=old
-# or, if x is already configured
-meson configure x -Dserver_debugger=true -Dserver_debugger_method=old
-```
-
-Then recompile.
-
-When you start scrcpy, it will start a debugger on port 5005 on the device.
+For Android < 11, it will start a debugger on port 5005 on the device and wait:
 Redirect that port to the computer:
 
 ```bash
 adb forward tcp:5005 tcp:5005
 ```
 
-In Android Studio, _Run_ > _Debug_ > _Edit configurations..._ On the left, click on
-`+`, _Remote_, and fill the form:
+For Android >= 11, first find the listening port:
+
+```bash
+adb jdwp
+# press Ctrl+C to interrupt
+```
+
+Then redirect the resulting PID:
+
+```bash
+adb forward tcp:5005 jdwp:XXXX  # replace XXXX
+```
+
+In Android Studio, _Run_ > _Debug_ > _Edit configurations..._ On the left, click
+on `+`, _Remote_, and fill the form:
 
  - Host: `localhost`
  - Port: `5005`

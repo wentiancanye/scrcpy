@@ -51,7 +51,6 @@ static void test_options(void) {
         "--fullscreen",
         "--max-fps", "30",
         "--max-size", "1024",
-        "--lock-video-orientation=2", // optional arguments require '='
         // "--no-control" is not compatible with "--turn-screen-off"
         // "--no-playback" is not compatible with "--fulscreen"
         "--port", "1234:1236",
@@ -78,9 +77,8 @@ static void test_options(void) {
     assert(opts->video_bit_rate == 5000000);
     assert(!strcmp(opts->crop, "100:200:300:400"));
     assert(opts->fullscreen);
-    assert(opts->max_fps == 30);
+    assert(!strcmp(opts->max_fps, "30"));
     assert(opts->max_size == 1024);
-    assert(opts->lock_video_orientation == 2);
     assert(opts->port_range.first == 1234);
     assert(opts->port_range.last == 1236);
     assert(!strcmp(opts->push_target, "/sdcard/Movies"));
@@ -124,32 +122,22 @@ static void test_options2(void) {
 }
 
 static void test_parse_shortcut_mods(void) {
-    struct sc_shortcut_mods mods;
+    uint8_t mods;
     bool ok;
 
     ok = sc_parse_shortcut_mods("lctrl", &mods);
     assert(ok);
-    assert(mods.count == 1);
-    assert(mods.data[0] == SC_SHORTCUT_MOD_LCTRL);
-
-    ok = sc_parse_shortcut_mods("lctrl+lalt", &mods);
-    assert(ok);
-    assert(mods.count == 1);
-    assert(mods.data[0] == (SC_SHORTCUT_MOD_LCTRL | SC_SHORTCUT_MOD_LALT));
+    assert(mods == SC_SHORTCUT_MOD_LCTRL);
 
     ok = sc_parse_shortcut_mods("rctrl,lalt", &mods);
     assert(ok);
-    assert(mods.count == 2);
-    assert(mods.data[0] == SC_SHORTCUT_MOD_RCTRL);
-    assert(mods.data[1] == SC_SHORTCUT_MOD_LALT);
+    assert(mods == (SC_SHORTCUT_MOD_RCTRL | SC_SHORTCUT_MOD_LALT));
 
-    ok = sc_parse_shortcut_mods("lsuper,rsuper+lalt,lctrl+rctrl+ralt", &mods);
+    ok = sc_parse_shortcut_mods("lsuper,rsuper,lctrl", &mods);
     assert(ok);
-    assert(mods.count == 3);
-    assert(mods.data[0] == SC_SHORTCUT_MOD_LSUPER);
-    assert(mods.data[1] == (SC_SHORTCUT_MOD_RSUPER | SC_SHORTCUT_MOD_LALT));
-    assert(mods.data[2] == (SC_SHORTCUT_MOD_LCTRL | SC_SHORTCUT_MOD_RCTRL |
-                            SC_SHORTCUT_MOD_RALT));
+    assert(mods == (SC_SHORTCUT_MOD_LSUPER
+                  | SC_SHORTCUT_MOD_RSUPER
+                  | SC_SHORTCUT_MOD_LCTRL));
 
     ok = sc_parse_shortcut_mods("", &mods);
     assert(!ok);

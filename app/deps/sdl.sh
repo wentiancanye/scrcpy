@@ -3,11 +3,12 @@ set -ex
 DEPS_DIR=$(dirname ${BASH_SOURCE[0]})
 cd "$DEPS_DIR"
 . common
+process_args "$@"
 
-VERSION=2.28.5
+VERSION=2.30.9
 FILENAME=SDL-$VERSION.tar.gz
 PROJECT_DIR=SDL-release-$VERSION
-SHA256SUM=9f0556e4a24ef5b267010038ad9e9948b62f236d5bcc4b22179f95ef62d84023
+SHA256SUM=682a055004081e37d81a7d4ce546c3ee3ef2e0e6a675ed2651e430ccd14eb407
 
 cd "$SOURCES_DIR"
 
@@ -25,23 +26,54 @@ cd "$BUILD_DIR/$PROJECT_DIR"
 export CFLAGS='-O2'
 export CXXFLAGS="$CFLAGS"
 
-if [[ -d "$HOST" ]]
+if [[ -d "$DIRNAME" ]]
 then
-    echo "'$PWD/$HOST' already exists, not reconfigured"
-    cd "$HOST"
+    echo "'$PWD/$HDIRNAME' already exists, not reconfigured"
+    cd "$DIRNAME"
 else
-    mkdir "$HOST"
-    cd "$HOST"
+    mkdir "$DIRNAME"
+    cd "$DIRNAME"
 
-    "$SOURCES_DIR/$PROJECT_DIR"/configure \
-        --prefix="$INSTALL_DIR/$HOST" \
-        --host="$HOST_TRIPLET" \
-        --enable-shared \
-        --disable-static
+    conf=(
+        --prefix="$INSTALL_DIR/$DIRNAME"
+    )
+
+    if [[ "$HOST" == linux ]]
+    then
+        conf+=(
+            --enable-video-wayland
+            --enable-video-x11
+        )
+    fi
+
+    if [[ "$LINK_TYPE" == static ]]
+    then
+        conf+=(
+            --enable-static
+            --disable-shared
+        )
+    else
+        conf+=(
+            --disable-static
+            --enable-shared
+        )
+    fi
+
+    if [[ "$BUILD_TYPE" == cross ]]
+    then
+        conf+=(
+            --host="$HOST_TRIPLET"
+        )
+    fi
+
+    "$SOURCES_DIR/$PROJECT_DIR"/configure "${conf[@]}"
 fi
 
 make -j
 # There is no "make install-strip"
 make install
 # Strip manually
-${HOST_TRIPLET}-strip "$INSTALL_DIR/$HOST/bin/SDL2.dll"
+if [[ "$LINK_TYPE" == shared && "$HOST" == win* ]]
+then
+    ${HOST_TRIPLET}-strip "$INSTALL_DIR/$DIRNAME/bin/SDL2.dll"
+fi

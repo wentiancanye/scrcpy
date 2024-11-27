@@ -5,6 +5,7 @@ src = [
     'src/adb/adb_parser.c',
     'src/adb/adb_tunnel.c',
     'src/audio_player.c',
+    'src/audio_regulator.c',
     'src/cli.c',
     'src/clock.c',
     'src/compat.c',
@@ -15,12 +16,14 @@ src = [
     'src/demuxer.c',
     'src/device_msg.c',
     'src/display.c',
+    'src/events.c',
     'src/icon.c',
     'src/file_pusher.c',
     'src/fps_counter.c',
     'src/frame_buffer.c',
     'src/input_manager.c',
     'src/keyboard_sdk.c',
+    'src/mouse_capture.c',
     'src/mouse_sdk.c',
     'src/opengl.c',
     'src/options.c',
@@ -31,10 +34,12 @@ src = [
     'src/screen.c',
     'src/server.c',
     'src/version.c',
+    'src/hid/hid_gamepad.c',
     'src/hid/hid_keyboard.c',
     'src/hid/hid_mouse.c',
     'src/trait/frame_source.c',
     'src/trait/packet_source.c',
+    'src/uhid/gamepad_uhid.c',
     'src/uhid/keyboard_uhid.c',
     'src/uhid/mouse_uhid.c',
     'src/uhid/uhid_output.c',
@@ -93,6 +98,7 @@ usb_support = get_option('usb')
 if usb_support
     src += [
         'src/usb/aoa_hid.c',
+        'src/usb/gamepad_aoa.c',
         'src/usb/keyboard_aoa.c',
         'src/usb/mouse_aoa.c',
         'src/usb/scrcpy_otg.c',
@@ -103,20 +109,22 @@ endif
 
 cc = meson.get_compiler('c')
 
+static = get_option('static')
+
 dependencies = [
-    dependency('libavformat', version: '>= 57.33'),
-    dependency('libavcodec', version: '>= 57.37'),
-    dependency('libavutil'),
-    dependency('libswresample'),
-    dependency('sdl2', version: '>= 2.0.5'),
+    dependency('libavformat', version: '>= 57.33', static: static),
+    dependency('libavcodec', version: '>= 57.37', static: static),
+    dependency('libavutil', static: static),
+    dependency('libswresample', static: static),
+    dependency('sdl2', version: '>= 2.0.5', static: static),
 ]
 
 if v4l2_support
-    dependencies += dependency('libavdevice')
+    dependencies += dependency('libavdevice', static: static)
 endif
 
 if usb_support
-    dependencies += dependency('libusb-1.0')
+    dependencies += dependency('libusb-1.0', static: static)
 endif
 
 if host_machine.system() == 'windows'
@@ -160,9 +168,6 @@ conf.set('DEFAULT_LOCAL_PORT_RANGE_LAST', '27199')
 
 # run a server debugger and wait for a client to be attached
 conf.set('SERVER_DEBUGGER', get_option('server_debugger'))
-
-# select the debugger method ('old' for Android < 9, 'new' for Android >= 9)
-conf.set('SERVER_DEBUGGER_METHOD_NEW', get_option('server_debugger_method') == 'new')
 
 # enable V4L2 support (linux only)
 conf.set('HAVE_V4L2', v4l2_support)

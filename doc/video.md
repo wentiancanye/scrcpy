@@ -27,6 +27,9 @@ preserved. That way, a device in 1920×1080 will be mirrored at 1024×576.
 If encoding fails, scrcpy automatically tries again with a lower definition
 (unless `--no-downsize-on-error` is enabled).
 
+For camera mirroring, the `--max-size` value is used to select the camera source
+size instead (among the available resolutions).
+
 
 ## Bit rate
 
@@ -93,7 +96,7 @@ Sometimes, the default encoder may have issues or even crash, so it is useful to
 try another one:
 
 ```bash
-scrcpy --video-codec=h264 --video-encoder='OMX.qcom.video.encoder.avc'
+scrcpy --video-codec=h264 --video-encoder=OMX.qcom.video.encoder.avc
 ```
 
 
@@ -103,24 +106,45 @@ The orientation may be applied at 3 different levels:
  - The [shortcut](shortcuts.md) <kbd>MOD</kbd>+<kbd>r</kbd> requests the
    device to switch between portrait and landscape (the current running app may
    refuse, if it does not support the requested orientation).
- - `--lock-video-orientation` changes the mirroring orientation (the orientation
+ - `--capture-orientation` changes the mirroring orientation (the orientation
    of the video sent from the device to the computer). This affects the
    recording.
  - `--orientation` is applied on the client side, and affects display and
    recording. For the display, it can be changed dynamically using
    [shortcuts](shortcuts.md).
 
-To lock the mirroring orientation (on the capture side):
+To capture the video with a specific orientation:
 
 ```bash
-scrcpy --lock-video-orientation      # initial (current) orientation
-scrcpy --lock-video-orientation=0    # natural orientation
-scrcpy --lock-video-orientation=90   # 90° clockwise
-scrcpy --lock-video-orientation=180  # 180°
-scrcpy --lock-video-orientation=270  # 270° clockwise
+scrcpy --capture-orientation=0
+scrcpy --capture-orientation=90       # 90° clockwise
+scrcpy --capture-orientation=180      # 180°
+scrcpy --capture-orientation=270      # 270° clockwise
+scrcpy --capture-orientation=flip0    # hflip
+scrcpy --capture-orientation=flip90   # hflip + 90° clockwise
+scrcpy --capture-orientation=flip180  # hflip + 180°
+scrcpy --capture-orientation=flip270  # hflip + 270° clockwise
 ```
 
-To orient the video (on the rendering side):
+The capture orientation can be locked by using `@`, so that a physical device
+rotation does not change the captured video orientation:
+
+```bash
+scrcpy --capture-orientation=@         # locked to the initial orientation
+scrcpy --capture-orientation=@0        # locked to 0°
+scrcpy --capture-orientation=@90       # locked to 90° clockwise
+scrcpy --capture-orientation=@180      # locked to 180°
+scrcpy --capture-orientation=@270      # locked to 270° clockwise
+scrcpy --capture-orientation=@flip0    # locked to hflip
+scrcpy --capture-orientation=@flip90   # locked to hflip + 90° clockwise
+scrcpy --capture-orientation=@flip180  # locked to hflip + 180°
+scrcpy --capture-orientation=@flip270  # locked to hflip + 270° clockwise
+```
+
+The capture orientation transform is applied after `--crop`, but before
+`--angle`.
+
+To orient the video (on the client side):
 
 ```bash
 scrcpy --orientation=0
@@ -141,6 +165,19 @@ to the MP4 or MKV target file. Flipping is not supported, so only the 4 first
 values are allowed when recording.
 
 
+## Angle
+
+To rotate the video content by a custom angle (in degrees, clockwise):
+
+```
+scrcpy --angle=23
+```
+
+The center of rotation is the center of the visible area.
+
+This transformation is applied after `--crop` and `--capture-orientation`.
+
+
 ## Crop
 
 The device screen may be cropped to mirror only part of the screen.
@@ -154,7 +191,11 @@ scrcpy --crop=1224:1440:0:0   # 1224x1440 at offset (0,0)
 The values are expressed in the device natural orientation (portrait for a
 phone, landscape for a tablet).
 
-If `--max-size` is also specified, resizing is applied after cropping.
+Cropping is performed before `--capture-orientation` and `--angle`.
+
+For display mirroring, `--max-size` is applied after cropping. For camera,
+`--max-size` is applied first (because it selects the source size rather than
+resizing the content).
 
 
 ## Display
@@ -175,6 +216,8 @@ scrcpy --list-displays
 A secondary display may only be controlled if the device runs at least Android
 10 (otherwise it is mirrored as read-only).
 
+It is also possible to create a [virtual display](virtual_display.md).
+
 
 ## Buffering
 
@@ -189,15 +232,15 @@ The configuration is available independently for the display,
 [v4l2 sinks](video.md#video4linux) and [audio](audio.md#buffering) playback.
 
 ```bash
-scrcpy --display-buffer=50   # add 50ms buffering for display
-scrcpy --v4l2-buffer=300     # add 300ms buffering for v4l2 sink
+scrcpy --video-buffer=50     # add 50ms buffering for video playback
 scrcpy --audio-buffer=200    # set 200ms buffering for audio playback
+scrcpy --v4l2-buffer=300     # add 300ms buffering for v4l2 sink
 ```
 
 They can be applied simultaneously:
 
 ```bash
-scrcpy --display-buffer=50 --v4l2-buffer=300
+scrcpy --video-buffer=50 --v4l2-buffer=300
 ```
 
 

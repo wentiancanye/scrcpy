@@ -1,8 +1,8 @@
 package com.genymobile.scrcpy.wrappers;
 
-import com.genymobile.scrcpy.Ln;
+import com.genymobile.scrcpy.AndroidVersions;
+import com.genymobile.scrcpy.util.Ln;
 
-import android.annotation.SuppressLint;
 import android.os.Build;
 import android.os.IInterface;
 
@@ -23,16 +23,22 @@ public final class PowerManager {
 
     private Method getIsScreenOnMethod() throws NoSuchMethodException {
         if (isScreenOnMethod == null) {
-            @SuppressLint("ObsoleteSdkInt") // we may lower minSdkVersion in the future
-            String methodName = Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH ? "isInteractive" : "isScreenOn";
-            isScreenOnMethod = manager.getClass().getMethod(methodName);
+            if (Build.VERSION.SDK_INT >= AndroidVersions.API_34_ANDROID_14) {
+                isScreenOnMethod = manager.getClass().getMethod("isDisplayInteractive", int.class);
+            } else {
+                isScreenOnMethod = manager.getClass().getMethod("isInteractive");
+            }
         }
         return isScreenOnMethod;
     }
 
-    public boolean isScreenOn() {
+    public boolean isScreenOn(int displayId) {
+
         try {
             Method method = getIsScreenOnMethod();
+            if (Build.VERSION.SDK_INT >= AndroidVersions.API_34_ANDROID_14) {
+                return (boolean) method.invoke(manager, displayId);
+            }
             return (boolean) method.invoke(manager);
         } catch (ReflectiveOperationException e) {
             Ln.e("Could not invoke method", e);

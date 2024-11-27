@@ -18,12 +18,11 @@
 // type: 1 byte; sequence: 8 bytes; paste flag: 1 byte; length: 4 bytes
 #define SC_CONTROL_MSG_CLIPBOARD_TEXT_MAX_LENGTH (SC_CONTROL_MSG_MAX_SIZE - 14)
 
-#define POINTER_ID_MOUSE UINT64_C(-1)
-#define POINTER_ID_GENERIC_FINGER UINT64_C(-2)
+#define SC_POINTER_ID_MOUSE UINT64_C(-1)
+#define SC_POINTER_ID_GENERIC_FINGER UINT64_C(-2)
 
 // Used for injecting an additional virtual pointer for pinch-to-zoom
-#define POINTER_ID_VIRTUAL_MOUSE UINT64_C(-3)
-#define POINTER_ID_VIRTUAL_FINGER UINT64_C(-4)
+#define SC_POINTER_ID_VIRTUAL_FINGER UINT64_C(-3)
 
 enum sc_control_msg_type {
     SC_CONTROL_MSG_TYPE_INJECT_KEYCODE,
@@ -36,19 +35,16 @@ enum sc_control_msg_type {
     SC_CONTROL_MSG_TYPE_COLLAPSE_PANELS,
     SC_CONTROL_MSG_TYPE_GET_CLIPBOARD,
     SC_CONTROL_MSG_TYPE_SET_CLIPBOARD,
-    SC_CONTROL_MSG_TYPE_SET_SCREEN_POWER_MODE,
+    SC_CONTROL_MSG_TYPE_SET_DISPLAY_POWER,
     SC_CONTROL_MSG_TYPE_ROTATE_DEVICE,
     SC_CONTROL_MSG_TYPE_UHID_CREATE,
     SC_CONTROL_MSG_TYPE_UHID_INPUT,
+    SC_CONTROL_MSG_TYPE_UHID_DESTROY,
     SC_CONTROL_MSG_TYPE_OPEN_HARD_KEYBOARD_SETTINGS,
+    SC_CONTROL_MSG_TYPE_START_APP,
+    SC_CONTROL_MSG_TYPE_RESET_VIDEO,
 
     SC_CONTROL_MSG_TYPE_ULOCK_SCREEN,
-};
-
-enum sc_screen_power_mode {
-    // see <https://android.googlesource.com/platform/frameworks/base.git/+/pie-release-2/core/java/android/view/SurfaceControl.java#305>
-    SC_SCREEN_POWER_MODE_OFF = 0,
-    SC_SCREEN_POWER_MODE_NORMAL = 2,
 };
 
 enum sc_copy_key {
@@ -96,10 +92,11 @@ struct sc_control_msg {
             bool paste;
         } set_clipboard;
         struct {
-            enum sc_screen_power_mode mode;
-        } set_screen_power_mode;
+            bool on;
+        } set_display_power;
         struct {
             uint16_t id;
+            const char *name; // pointer to static data
             uint16_t report_desc_size;
             const uint8_t *report_desc; // pointer to static data
         } uhid_create;
@@ -108,6 +105,12 @@ struct sc_control_msg {
             uint16_t size;
             uint8_t data[SC_HID_MAX_SIZE];
         } uhid_input;
+        struct {
+            uint16_t id;
+        } uhid_destroy;
+        struct {
+            char *name;
+        } start_app;
     };
 };
 
@@ -118,6 +121,11 @@ sc_control_msg_serialize(const struct sc_control_msg *msg, uint8_t *buf);
 
 void
 sc_control_msg_log(const struct sc_control_msg *msg);
+
+// Even when the buffer is "full", some messages must absolutely not be dropped
+// to avoid inconsistencies.
+bool
+sc_control_msg_is_droppable(const struct sc_control_msg *msg);
 
 void
 sc_control_msg_destroy(struct sc_control_msg *msg);
