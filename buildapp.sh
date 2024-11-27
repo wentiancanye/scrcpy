@@ -19,8 +19,18 @@
 # 编译 scrcpy 需要安装 nasm 和 yasm —— SDL
 # ffmpeg 编译命令 去掉 eanble zlib
 
-make -f release.mk prepare-deps-win64
-make -f release.mk build-win64
-cd build-win64/app
-ls -l
+#make -f release.mk prepare-deps-win64
+#make -f release.mk build-win64
+#cd build-win64/app
+#ls -l
 
+# 2024-11-28 03:21:49 编译新方法
+# 创建 app/deps/work/install/win64-cross-shared
+# 注释 release/build_windows.sh 里面的 sdl 和 ffmpeg 的内容
+# 下载 变更版本 https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-full_build-shared.7z
+# 下载 变更版本 https://github.com/libsdl-org/SDL/releases/download/release-2.30.9/SDL2-devel-2.30.9-mingw.tar.gz
+# 复制 原来的 app/deps/work/install/win64-cross-shared/lib/pkgconfig 下面的 libavcodec.pc  libavformat.pc  libavutil.pc  libswresample.pc 到 app/deps/work/install/win64-cross-shared/lib/pkgconfig
+# 项目根目录下面的 pkgconfig 可以做参考
+# 然后编译即可
+cd release
+./build_windows.sh 64
