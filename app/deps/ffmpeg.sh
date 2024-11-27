@@ -78,7 +78,6 @@ else
         --enable-protocol=file \
         --enable-demuxer=image2 \
         --enable-parser=png \
-        --enable-zlib \
         --enable-muxer=matroska \
         --enable-muxer=mp4 \
         --enable-muxer=opus \

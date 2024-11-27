@@ -15,6 +15,10 @@
 #sudo apt remove -y meson
 #sudo pip3 install --upgrade meson
 
+#2024-05-21 00:01:56
+# 编译 scrcpy 需要安装 nasm 和 yasm —— SDL
+# ffmpeg 编译命令 去掉 eanble zlib
+
 make -f release.mk prepare-deps-win64
 make -f release.mk build-win64
 cd build-win64/app
