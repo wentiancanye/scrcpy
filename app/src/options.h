@@ -5,7 +5,6 @@
 
 #include <assert.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 
 #include "util/tick.h"
@@ -60,6 +59,14 @@ enum sc_audio_source {
     SC_AUDIO_SOURCE_OUTPUT,
     SC_AUDIO_SOURCE_MIC,
     SC_AUDIO_SOURCE_PLAYBACK,
+    SC_AUDIO_SOURCE_MIC_UNPROCESSED,
+    SC_AUDIO_SOURCE_MIC_CAMCORDER,
+    SC_AUDIO_SOURCE_MIC_VOICE_RECOGNITION,
+    SC_AUDIO_SOURCE_MIC_VOICE_COMMUNICATION,
+    SC_AUDIO_SOURCE_VOICE_CALL,
+    SC_AUDIO_SOURCE_VOICE_CALL_UPLINK,
+    SC_AUDIO_SOURCE_VOICE_CALL_DOWNLINK,
+    SC_AUDIO_SOURCE_VOICE_PERFORMANCE,
 };
 
 enum sc_camera_facing {
@@ -88,6 +95,13 @@ enum sc_orientation_lock {
     SC_ORIENTATION_UNLOCKED,
     SC_ORIENTATION_LOCKED_VALUE,   // lock to specified orientation
     SC_ORIENTATION_LOCKED_INITIAL, // lock to initial device orientation
+};
+
+enum sc_display_ime_policy {
+    SC_DISPLAY_IME_POLICY_UNDEFINED,
+    SC_DISPLAY_IME_POLICY_LOCAL,
+    SC_DISPLAY_IME_POLICY_FALLBACK,
+    SC_DISPLAY_IME_POLICY_HIDE,
 };
 
 static inline bool
@@ -252,6 +266,7 @@ struct scrcpy_options {
     enum sc_orientation_lock capture_orientation_lock;
     enum sc_orientation display_orientation;
     enum sc_orientation record_orientation;
+    enum sc_display_ime_policy display_ime_policy;
     int16_t window_x; // SC_WINDOW_POSITION_UNDEFINED for "auto"
     int16_t window_y; // SC_WINDOW_POSITION_UNDEFINED for "auto"
     uint16_t window_width;
@@ -310,6 +325,7 @@ struct scrcpy_options {
     bool audio_dup;
     const char *new_display; // [<width>x<height>][/<dpi>] parsed by the server
     const char *start_app;
+    bool vd_destroy_content;
     bool vd_system_decorations;
 };
 

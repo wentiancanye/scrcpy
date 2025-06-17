@@ -1,10 +1,19 @@
 #include "scrcpy_otg.h"
 
+#include <assert.h>
+#include <stdbool.h>
+#include <stdlib.h>
 #include <SDL2/SDL.h>
 
-#include "adb/adb.h"
+#ifdef _WIN32
+# include "adb/adb.h"
+#endif
 #include "events.h"
-#include "screen_otg.h"
+#include "usb/screen_otg.h"
+#include "usb/aoa_hid.h"
+#include "usb/gamepad_aoa.h"
+#include "usb/keyboard_aoa.h"
+#include "usb/mouse_aoa.h"
 #include "util/log.h"
 
 struct scrcpy_otg {
@@ -95,9 +104,14 @@ scrcpy_otg(struct scrcpy_options *options) {
     // On Windows, only one process could open a USB device
     // <https://github.com/Genymobile/scrcpy/issues/2773>
     LOGI("Killing adb server (if any)...");
-    unsigned flags = SC_ADB_NO_STDOUT | SC_ADB_NO_STDERR | SC_ADB_NO_LOGERR;
-    // uninterruptible (intr == NULL), but in practice it's very quick
-    sc_adb_kill_server(NULL, flags);
+    if (sc_adb_init()) {
+        unsigned flags = SC_ADB_NO_STDOUT | SC_ADB_NO_STDERR | SC_ADB_NO_LOGERR;
+        // uninterruptible (intr == NULL), but in practice it's very quick
+        sc_adb_kill_server(NULL, flags);
+        sc_adb_destroy();
+    } else {
+        LOGW("Could not call adb executable, adb server not killed");
+    }
 #endif
 
     static const struct sc_usb_callbacks cbs = {

@@ -1,8 +1,12 @@
 #include "input_manager.h"
 
 #include <assert.h>
-#include <SDL2/SDL_keycode.h>
+#include <stdlib.h>
+#include <string.h>
+#include <SDL2/SDL.h>
 
+#include "android/input.h"
+#include "android/keycodes.h"
 #include "input_events.h"
 #include "screen.h"
 #include "shortcut_mod.h"
@@ -926,7 +930,6 @@ sc_input_manager_process_mouse_wheel(struct sc_input_manager *im,
 static void
 sc_input_manager_process_gamepad_device(struct sc_input_manager *im,
                                        const SDL_ControllerDeviceEvent *event) {
-    SDL_JoystickID id;
     if (event->type == SDL_CONTROLLERDEVICEADDED) {
         SDL_GameController *gc = SDL_GameControllerOpen(event->which);
         if (!gc) {
@@ -941,9 +944,12 @@ sc_input_manager_process_gamepad_device(struct sc_input_manager *im,
             return;
         }
 
-        id = SDL_JoystickInstanceID(joystick);
+        struct sc_gamepad_device_event evt = {
+            .gamepad_id = SDL_JoystickInstanceID(joystick),
+        };
+        im->gp->ops->process_gamepad_added(im->gp, &evt);
     } else if (event->type == SDL_CONTROLLERDEVICEREMOVED) {
-        id = event->which;
+        SDL_JoystickID id = event->which;
 
         SDL_GameController *gc = SDL_GameControllerFromInstanceID(id);
         if (gc) {
@@ -951,16 +957,15 @@ sc_input_manager_process_gamepad_device(struct sc_input_manager *im,
         } else {
             LOGW("Unknown gamepad device removed");
         }
+
+        struct sc_gamepad_device_event evt = {
+            .gamepad_id = id,
+        };
+        im->gp->ops->process_gamepad_removed(im->gp, &evt);
     } else {
         // Nothing to do
         return;
     }
-
-    struct sc_gamepad_device_event evt = {
-        .type = sc_gamepad_device_event_type_from_sdl_type(event->type),
-        .gamepad_id = id,
-    };
-    im->gp->ops->process_gamepad_device(im->gp, &evt);
 }
 
 static void

@@ -4,8 +4,11 @@ import com.genymobile.scrcpy.device.Device;
 import com.genymobile.scrcpy.util.Ln;
 import com.genymobile.scrcpy.util.Settings;
 import com.genymobile.scrcpy.util.SettingsException;
+import com.genymobile.scrcpy.wrappers.ServiceManager;
 
 import android.os.BatteryManager;
+import android.system.ErrnoException;
+import android.system.Os;
 
 import java.io.File;
 import java.io.IOException;
@@ -24,6 +27,7 @@ public final class CleanUp {
     private boolean pendingRestoreDisplayPower;
 
     private Thread thread;
+    private boolean interrupted;
 
     private CleanUp(Options options) {
         thread = new Thread(() -> runCleanUp(options), "cleanup");
@@ -34,8 +38,10 @@ public final class CleanUp {
         return new CleanUp(options);
     }
 
-    public void interrupt() {
-        thread.interrupt();
+    public synchronized void interrupt() {
+        // Do not use thread.interrupt() because only the wait() call must be interrupted, not Command.exec()
+        interrupted = true;
+        notify();
     }
 
     public void join() throws InterruptedException {
@@ -92,20 +98,31 @@ public final class CleanUp {
             }
         }
 
-        boolean powerOffScreen = options.getPowerOffScreenOnClose();
         int displayId = options.getDisplayId();
 
+        int restoreDisplayImePolicy = -1;
+        if (displayId > 0) {
+            int displayImePolicy = options.getDisplayImePolicy();
+            if (displayImePolicy != -1) {
+                int currentDisplayImePolicy = ServiceManager.getWindowManager().getDisplayImePolicy(displayId);
+                if (currentDisplayImePolicy != displayImePolicy) {
+                    ServiceManager.getWindowManager().setDisplayImePolicy(displayId, displayImePolicy);
+                    restoreDisplayImePolicy = currentDisplayImePolicy;
+                }
+            }
+        }
+
+        boolean powerOffScreen = options.getPowerOffScreenOnClose();
+
         try {
-            run(displayId, restoreStayOn, disableShowTouches, powerOffScreen, restoreScreenOffTimeout);
-        } catch (InterruptedException e) {
-            // ignore
+            run(displayId, restoreStayOn, disableShowTouches, powerOffScreen, restoreScreenOffTimeout, restoreDisplayImePolicy);
         } catch (IOException e) {
             Ln.e("Clean up I/O exception", e);
         }
     }
 
-    private void run(int displayId, int restoreStayOn, boolean disableShowTouches, boolean powerOffScreen, int restoreScreenOffTimeout)
-            throws IOException, InterruptedException {
+    private void run(int displayId, int restoreStayOn, boolean disableShowTouches, boolean powerOffScreen, int restoreScreenOffTimeout,
+            int restoreDisplayImePolicy) throws IOException {
         String[] cmd = {
                 "app_process",
                 "/",
@@ -115,6 +132,7 @@ public final class CleanUp {
                 String.valueOf(disableShowTouches),
                 String.valueOf(powerOffScreen),
                 String.valueOf(restoreScreenOffTimeout),
+                String.valueOf(restoreDisplayImePolicy),
         };
 
         ProcessBuilder builder = new ProcessBuilder(cmd);
@@ -126,8 +144,15 @@ public final class CleanUp {
             int localPendingChanges;
             boolean localPendingRestoreDisplayPower;
             synchronized (this) {
-                while (pendingChanges == 0) {
-                    wait();
+                while (!interrupted && pendingChanges == 0) {
+                    try {
+                        wait();
+                    } catch (InterruptedException e) {
+                        throw new AssertionError("Clean up thread MUST NOT be interrupted");
+                    }
+                }
+                if (interrupted) {
+                    break;
                 }
                 localPendingChanges = pendingChanges;
                 localPendingRestoreDisplayPower = pendingRestoreDisplayPower;
@@ -155,6 +180,12 @@ public final class CleanUp {
     }
 
     public static void main(String... args) {
+        try {
+            // Start a new session to avoid being terminated along with the server process on some devices
+            Os.setsid();
+        } catch (ErrnoException e) {
+            Ln.e("setsid() failed", e);
+        }
         unlinkSelf();
 
         int displayId = Integer.parseInt(args[0]);
@@ -162,6 +193,7 @@ public final class CleanUp {
         boolean disableShowTouches = Boolean.parseBoolean(args[2]);
         boolean powerOffScreen = Boolean.parseBoolean(args[3]);
         int restoreScreenOffTimeout = Integer.parseInt(args[4]);
+        int restoreDisplayImePolicy = Integer.parseInt(args[5]);
 
         // Dynamic option
         boolean restoreDisplayPower = false;
@@ -207,13 +239,20 @@ public final class CleanUp {
             }
         }
 
-        if (displayId != Device.DISPLAY_ID_NONE && Device.isScreenOn(displayId)) {
+        if (restoreDisplayImePolicy != -1) {
+            Ln.i("Restoring \"display IME policy\"");
+            ServiceManager.getWindowManager().setDisplayImePolicy(displayId, restoreDisplayImePolicy);
+        }
+
+        // Change the power of the main display when mirroring a virtual display
+        int targetDisplayId = displayId != Device.DISPLAY_ID_NONE ? displayId : 0;
+        if (Device.isScreenOn(targetDisplayId)) {
             if (powerOffScreen) {
                 Ln.i("Power off screen");
-                Device.powerOffScreen(displayId);
+                Device.powerOffScreen(targetDisplayId);
             } else if (restoreDisplayPower) {
                 Ln.i("Restoring display power");
-                Device.setDisplayPower(displayId, true);
+                Device.setDisplayPower(targetDisplayId, true);
             }
         }
 

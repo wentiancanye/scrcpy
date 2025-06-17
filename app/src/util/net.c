@@ -1,31 +1,26 @@
 #include "net.h"
 
 #include <assert.h>
-#include <errno.h>
 #include <stdio.h>
-
-#include "log.h"
 
 #ifdef _WIN32
 # include <ws2tcpip.h>
   typedef int socklen_t;
-  typedef SOCKET sc_raw_socket;
-# define SC_RAW_SOCKET_NONE INVALID_SOCKET
 #else
-# include <sys/types.h>
-# include <sys/socket.h>
+# include <arpa/inet.h>
+# include <fcntl.h>
 # include <netinet/in.h>
 # include <netinet/tcp.h>
-# include <arpa/inet.h>
 # include <unistd.h>
-# include <fcntl.h>
+# include <sys/socket.h>
+# include <sys/types.h>
 # define SOCKET_ERROR -1
   typedef struct sockaddr_in SOCKADDR_IN;
   typedef struct sockaddr SOCKADDR;
   typedef struct in_addr IN_ADDR;
-  typedef int sc_raw_socket;
-# define SC_RAW_SOCKET_NONE -1
 #endif
+
+#include "util/log.h"
 
 bool
 net_init(void) {
@@ -47,17 +42,26 @@ net_cleanup(void) {
 #endif
 }
 
+static inline bool
+sc_raw_socket_close(sc_raw_socket raw_sock) {
+#ifndef _WIN32
+    return !close(raw_sock);
+#else
+    return !closesocket(raw_sock);
+#endif
+}
+
 static inline sc_socket
 wrap(sc_raw_socket sock) {
-#ifdef _WIN32
-    if (sock == INVALID_SOCKET) {
+#ifdef SC_SOCKET_CLOSE_ON_INTERRUPT
+    if (sock == SC_RAW_SOCKET_NONE) {
         return SC_SOCKET_NONE;
     }
 
-    struct sc_socket_windows *socket = malloc(sizeof(*socket));
+    struct sc_socket_wrapper *socket = malloc(sizeof(*socket));
     if (!socket) {
         LOG_OOM();
-        closesocket(sock);
+        sc_raw_socket_close(sock);
         return SC_SOCKET_NONE;
     }
 
@@ -72,9 +76,9 @@ wrap(sc_raw_socket sock) {
 
 static inline sc_raw_socket
 unwrap(sc_socket socket) {
-#ifdef _WIN32
+#ifdef SC_SOCKET_CLOSE_ON_INTERRUPT
     if (socket == SC_SOCKET_NONE) {
-        return INVALID_SOCKET;
+        return SC_RAW_SOCKET_NONE;
     }
 
     return socket->socket;
@@ -82,17 +86,6 @@ unwrap(sc_socket socket) {
     return socket;
 #endif
 }
-
-#ifndef HAVE_SOCK_CLOEXEC // avoid unused-function warning
-static inline bool
-sc_raw_socket_close(sc_raw_socket raw_sock) {
-#ifndef _WIN32
-    return !close(raw_sock);
-#else
-    return !closesocket(raw_sock);
-#endif
-}
-#endif
 
 #ifndef HAVE_SOCK_CLOEXEC
 // If SOCK_CLOEXEC does not exist, the flag must be set manually once the
@@ -248,9 +241,9 @@ net_interrupt(sc_socket socket) {
 
     sc_raw_socket raw_sock = unwrap(socket);
 
-#ifdef _WIN32
+#ifdef SC_SOCKET_CLOSE_ON_INTERRUPT
     if (!atomic_flag_test_and_set(&socket->closed)) {
-        return !closesocket(raw_sock);
+        return sc_raw_socket_close(raw_sock);
     }
     return true;
 #else
@@ -262,15 +255,15 @@ bool
 net_close(sc_socket socket) {
     sc_raw_socket raw_sock = unwrap(socket);
 
-#ifdef _WIN32
+#ifdef SC_SOCKET_CLOSE_ON_INTERRUPT
     bool ret = true;
     if (!atomic_flag_test_and_set(&socket->closed)) {
-        ret = !closesocket(raw_sock);
+        ret = sc_raw_socket_close(raw_sock);
     }
     free(socket);
     return ret;
 #else
-    return !close(raw_sock);
+    return sc_raw_socket_close(raw_sock);
 #endif
 }
 

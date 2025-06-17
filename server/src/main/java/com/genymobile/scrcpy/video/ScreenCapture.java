@@ -124,15 +124,9 @@ public class ScreenCapture extends SurfaceCapture {
             inputSize = videoSize;
         }
 
-        int virtualDisplayId;
-        PositionMapper positionMapper;
         try {
             virtualDisplay = ServiceManager.getDisplayManager()
                     .createVirtualDisplay("scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
-            virtualDisplayId = virtualDisplay.getDisplay().getDisplayId();
-
-            // The positions are relative to the virtual display, not the original display (so use inputSize, not deviceSize!)
-            positionMapper = PositionMapper.create(videoSize, transform, inputSize);
             Ln.d("Display: using DisplayManager API");
         } catch (Exception displayManagerException) {
             try {
@@ -140,11 +134,7 @@ public class ScreenCapture extends SurfaceCapture {
 
                 Size deviceSize = displayInfo.getSize();
                 int layerStack = displayInfo.getLayerStack();
-
                 setDisplaySurface(display, surface, deviceSize.toRect(), inputSize.toRect(), layerStack);
-                virtualDisplayId = displayId;
-
-                positionMapper = PositionMapper.create(videoSize, transform, deviceSize);
                 Ln.d("Display: using SurfaceControl API");
             } catch (Exception surfaceControlException) {
                 Ln.e("Could not create display using DisplayManager", displayManagerException);
@@ -154,6 +144,18 @@ public class ScreenCapture extends SurfaceCapture {
         }
 
         if (vdListener != null) {
+            int virtualDisplayId;
+            PositionMapper positionMapper;
+            if (virtualDisplay == null || displayId == 0) {
+                // Surface control or main display: send all events to the original display, relative to the device size
+                Size deviceSize = displayInfo.getSize();
+                positionMapper = PositionMapper.create(videoSize, transform, deviceSize);
+                virtualDisplayId = displayId;
+            } else {
+                // The positions are relative to the virtual display, not the original display (so use inputSize, not deviceSize!)
+                positionMapper = PositionMapper.create(videoSize, transform, inputSize);
+                virtualDisplayId = virtualDisplay.getDisplay().getDisplayId();
+            }
             vdListener.onNewVirtualDisplay(virtualDisplayId, positionMapper);
         }
     }

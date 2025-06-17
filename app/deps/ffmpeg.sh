@@ -5,10 +5,10 @@ cd "$DEPS_DIR"
 . common
 process_args "$@"
 
-VERSION=7.1
+VERSION=7.1.1
 FILENAME=ffmpeg-$VERSION.tar.xz
 PROJECT_DIR=ffmpeg-$VERSION
-SHA256SUM=40973D44970DBC83EF302B0609F2E74982BE2D85916DD2EE7472D30678A7ABE6
+SHA256SUM=733984395e0dbbe5c046abda2dc49a5544e7e0e1e2366bba849222ae9e3a03b1
 
 cd "$SOURCES_DIR"
 
@@ -40,16 +40,14 @@ else
         export LDFLAGS='-static-libgcc -static'
     elif [[ "$HOST" == "macos" ]]
     then
-        export LDFLAGS="$LDFLAGS -L/opt/homebrew/opt/zlib/lib"
-        export CPPFLAGS="$CPPFLAGS -I/opt/homebrew/opt/zlib/include"
-
-        export LDFLAGS="$LDFLAGS-L/opt/homebrew/opt/libiconv/lib"
-        export CPPFLAGS="$CPPFLAGS -I/opt/homebrew/opt/libiconv/include"
         export PKG_CONFIG_PATH="/opt/homebrew/opt/zlib/lib/pkgconfig"
     fi
 
+    export PKG_CONFIG_PATH="$INSTALL_DIR/$DIRNAME/lib/pkgconfig:$PKG_CONFIG_PATH"
+
     conf=(
         --prefix="$INSTALL_DIR/$DIRNAME"
+        --pkg-config-flags="--static"
         --extra-cflags="-O2 -fPIC"
         --disable-programs
         --disable-doc
@@ -62,9 +60,11 @@ else
         --disable-vaapi
         --disable-vdpau
         --enable-swresample
+        --enable-libdav1d
         --enable-decoder=h264
         --enable-decoder=hevc
         --enable-decoder=av1
+        --enable-decoder=libdav1d
         --enable-decoder=pcm_s16le
         --enable-decoder=opus
         --enable-decoder=aac

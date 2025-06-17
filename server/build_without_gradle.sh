@@ -12,7 +12,7 @@
 set -e
 
 SCRCPY_DEBUG=false
-SCRCPY_VERSION_NAME=3.0
+SCRCPY_VERSION_NAME=3.3
 
 PLATFORM=${ANDROID_PLATFORM:-35}
 BUILD_TOOLS=${ANDROID_BUILD_TOOLS:-35.0.0}
@@ -47,10 +47,8 @@ EOF
 
 echo "Generating java from aidl..."
 cd "$SERVER_DIR/src/main/aidl"
-"$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" -I. android/view/IRotationWatcher.aidl
 "$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" -I. \
     android/content/IOnPrimaryClipChangedListener.aidl
-"$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" -I. android/view/IDisplayFoldListener.aidl
 "$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" -I. -p "$ANDROID_AIDL" \
     android/view/IDisplayWindowListener.aidl
 

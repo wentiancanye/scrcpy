@@ -1,19 +1,17 @@
-#ifndef SERVER_H
-#define SERVER_H
+#ifndef SC_SERVER_H
+#define SC_SERVER_H
 
 #include "common.h"
 
-#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 #include "adb/adb_tunnel.h"
-#include "coords.h"
 #include "options.h"
 #include "util/intr.h"
-#include "util/log.h"
 #include "util/net.h"
 #include "util/thread.h"
+#include "util/tick.h"
 
 #define SC_DEVICE_NAME_FIELD_LENGTH 64
 struct sc_server_info {
@@ -52,6 +50,7 @@ struct sc_server_params {
     bool control;
     uint32_t display_id;
     const char *new_display;
+    enum sc_display_ime_policy display_ime_policy;
     bool video;
     bool audio;
     bool audio_dup;
@@ -69,6 +68,7 @@ struct sc_server_params {
     bool power_on;
     bool kill_adb_on_close;
     bool camera_high_speed;
+    bool vd_destroy_content;
     bool vd_system_decorations;
     uint8_t list;
 };

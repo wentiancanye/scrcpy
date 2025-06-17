@@ -4,9 +4,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
-#include "adb_device.h"
-#include "adb_parser.h"
+#include "adb/adb_device.h"
+#include "adb/adb_parser.h"
+#include "util/env.h"
 #include "util/file.h"
 #include "util/log.h"
 #include "util/process_intr.h"
@@ -24,15 +26,45 @@
  */
 #define SC_ADB_COMMAND(...) { sc_adb_get_executable(), __VA_ARGS__, NULL }
 
-static const char *adb_executable;
+static char *adb_executable;
+
+bool
+sc_adb_init(void) {
+    adb_executable = sc_get_env("ADB");
+    if (adb_executable) {
+        LOGD("Using adb: %s", adb_executable);
+        return true;
+    }
+
+#if !defined(PORTABLE) || defined(_WIN32)
+    adb_executable = strdup("adb");
+    if (!adb_executable) {
+        LOG_OOM();
+        return false;
+    }
+#else
+    // For portable builds, use the absolute path to the adb executable
+    // in the same directory as scrcpy (except on Windows, where "adb"
+    // is sufficient)
+    adb_executable = sc_file_get_local_path("adb");
+    if (!adb_executable) {
+        // Error already logged
+        return false;
+    }
+
+    LOGD("Using adb (portable): %s", adb_executable);
+#endif
+
+    return true;
+}
+
+void
+sc_adb_destroy(void) {
+    free(adb_executable);
+}
 
 const char *
 sc_adb_get_executable(void) {
-    if (!adb_executable) {
-        adb_executable = getenv("ADB");
-        if (!adb_executable)
-            adb_executable = "adb";
-    }
     return adb_executable;
 }
 
@@ -381,7 +413,7 @@ sc_adb_connect(struct sc_intr *intr, const char *ip_port, unsigned flags) {
 
     // "adb connect" always returns successfully (with exit code 0), even in
     // case of failure. As a workaround, check if its output starts with
-    // "connected".
+    // "connected" or "already connected".
     char buf[128];
     ssize_t r = sc_pipe_read_all_intr(intr, pid, pout, buf, sizeof(buf) - 1);
     sc_pipe_close(pout);
@@ -398,7 +430,8 @@ sc_adb_connect(struct sc_intr *intr, const char *ip_port, unsigned flags) {
     assert((size_t) r < sizeof(buf));
     buf[r] = '\0';
 
-    ok = !strncmp("connected", buf, sizeof("connected") - 1);
+    ok = !strncmp("connected", buf, sizeof("connected") - 1)
+        || !strncmp("already connected", buf, sizeof("already connected") - 1);
     if (!ok && !(flags & SC_ADB_NO_STDERR)) {
         // "adb connect" also prints errors to stdout. Since we capture it,
         // re-print the error to stderr.

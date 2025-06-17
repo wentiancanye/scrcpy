@@ -4,10 +4,18 @@ cd "$(dirname ${BASH_SOURCE[0]})"
 . build_common
 cd .. # root project dir
 
-MACOS_BUILD_DIR="$WORK_DIR/build-macos"
+if [[ $# != 1 ]]
+then
+    echo "Syntax: $0 <arch>" >&2
+    exit 1
+fi
+
+ARCH="$1"
+MACOS_BUILD_DIR="$WORK_DIR/build-macos-$ARCH"
 
 app/deps/adb_macos.sh
 app/deps/sdl.sh macos native static
+app/deps/dav1d.sh macos native static
 app/deps/ffmpeg.sh macos native static
 app/deps/libusb.sh macos native static
 
@@ -29,8 +37,7 @@ ninja -C "$MACOS_BUILD_DIR"
 
 # Group intermediate outputs into a 'dist' directory
 mkdir -p "$MACOS_BUILD_DIR/dist"
-cp "$MACOS_BUILD_DIR"/app/scrcpy "$MACOS_BUILD_DIR/dist/scrcpy_bin"
+cp "$MACOS_BUILD_DIR"/app/scrcpy "$MACOS_BUILD_DIR/dist/"
 cp app/data/icon.png "$MACOS_BUILD_DIR/dist/"
-cp app/data/scrcpy_static_wrapper.sh "$MACOS_BUILD_DIR/dist/scrcpy"
 cp app/scrcpy.1 "$MACOS_BUILD_DIR/dist/"
 cp -r "$ADB_INSTALL_DIR"/. "$MACOS_BUILD_DIR/dist/"

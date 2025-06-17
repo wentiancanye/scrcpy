@@ -1,5 +1,6 @@
 #include "hid_keyboard.h"
 
+#include <assert.h>
 #include <string.h>
 
 #include "util/log.h"
@@ -335,7 +336,6 @@ sc_hid_keyboard_generate_input_from_mods(struct sc_hid_input *hid_input,
 
 void sc_hid_keyboard_generate_open(struct sc_hid_open *hid_open) {
     hid_open->hid_id = SC_HID_ID_KEYBOARD;
-    hid_open->name = NULL; // No name specified after "scrcpy"
     hid_open->report_desc = SC_HID_KEYBOARD_REPORT_DESC;
     hid_open->report_desc_size = sizeof(SC_HID_KEYBOARD_REPORT_DESC);
 }

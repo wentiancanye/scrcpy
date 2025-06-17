@@ -1,18 +1,18 @@
 #include "server.h"
 
 #include <assert.h>
-#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
-#include <SDL2/SDL_timer.h>
-#include <SDL2/SDL_platform.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
 
 #include "adb/adb.h"
-#include "util/binary.h"
+#include "util/env.h"
 #include "util/file.h"
 #include "util/log.h"
 #include "util/net_intr.h"
-#include "util/process_intr.h"
+#include "util/process.h"
 #include "util/str.h"
 
 #define SC_SERVER_FILENAME "scrcpy-server"
@@ -25,35 +25,22 @@
 
 static char *
 get_server_path(void) {
-#ifdef __WINDOWS__
-    const wchar_t *server_path_env = _wgetenv(L"SCRCPY_SERVER_PATH");
-#else
-    const char *server_path_env = getenv("SCRCPY_SERVER_PATH");
-#endif
-    if (server_path_env) {
+    char *server_path = sc_get_env("SCRCPY_SERVER_PATH");
+    if (server_path) {
         // if the envvar is set, use it
-#ifdef __WINDOWS__
-        char *server_path = sc_str_from_wchars(server_path_env);
-#else
-        char *server_path = strdup(server_path_env);
-#endif
-        if (!server_path) {
-            LOG_OOM();
-            return NULL;
-        }
         LOGD("Using SCRCPY_SERVER_PATH: %s", server_path);
         return server_path;
     }
 
 #ifndef PORTABLE
     LOGD("Using server: " SC_SERVER_PATH_DEFAULT);
-    char *server_path = strdup(SC_SERVER_PATH_DEFAULT);
+    server_path = strdup(SC_SERVER_PATH_DEFAULT);
     if (!server_path) {
         LOG_OOM();
         return NULL;
     }
 #else
-    char *server_path = sc_file_get_local_path(SC_SERVER_FILENAME);
+    server_path = sc_file_get_local_path(SC_SERVER_FILENAME);
     if (!server_path) {
         LOGE("Could not get local file path, "
              "using " SC_SERVER_FILENAME " from current directory");
@@ -162,8 +149,39 @@ sc_server_get_audio_source_name(enum sc_audio_source audio_source) {
             return "mic";
         case SC_AUDIO_SOURCE_PLAYBACK:
             return "playback";
+        case SC_AUDIO_SOURCE_MIC_UNPROCESSED:
+            return "mic-unprocessed";
+        case SC_AUDIO_SOURCE_MIC_CAMCORDER:
+            return "mic-camcorder";
+        case SC_AUDIO_SOURCE_MIC_VOICE_RECOGNITION:
+            return "mic-voice-recognition";
+        case SC_AUDIO_SOURCE_MIC_VOICE_COMMUNICATION:
+            return "mic-voice-communication";
+        case SC_AUDIO_SOURCE_VOICE_CALL:
+            return "voice-call";
+        case SC_AUDIO_SOURCE_VOICE_CALL_UPLINK:
+            return "voice-call-uplink";
+        case SC_AUDIO_SOURCE_VOICE_CALL_DOWNLINK:
+            return "voice-call-downlink";
+        case SC_AUDIO_SOURCE_VOICE_PERFORMANCE:
+            return "voice-performance";
         default:
             assert(!"unexpected audio source");
+            return NULL;
+    }
+}
+
+static const char *
+sc_server_get_display_ime_policy_name(enum sc_display_ime_policy policy) {
+    switch (policy) {
+        case SC_DISPLAY_IME_POLICY_LOCAL:
+            return "local";
+        case SC_DISPLAY_IME_POLICY_FALLBACK:
+            return "fallback";
+        case SC_DISPLAY_IME_POLICY_HIDE:
+            return "hide";
+        default:
+            assert(!"unexpected display IME policy");
             return NULL;
     }
 }
@@ -389,6 +407,13 @@ execute_server(struct sc_server *server,
         VALIDATE_STRING(params->new_display);
         ADD_PARAM("new_display=%s", params->new_display);
     }
+    if (params->display_ime_policy != SC_DISPLAY_IME_POLICY_UNDEFINED) {
+        ADD_PARAM("display_ime_policy=%s",
+            sc_server_get_display_ime_policy_name(params->display_ime_policy));
+    }
+    if (!params->vd_destroy_content) {
+        ADD_PARAM("vd_destroy_content=false");
+    }
     if (!params->vd_system_decorations) {
         ADD_PARAM("vd_system_decorations=false");
     }
@@ -497,14 +522,21 @@ sc_server_init(struct sc_server *server, const struct sc_server_params *params,
     // end of the program
     server->params = *params;
 
-    bool ok = sc_mutex_init(&server->mutex);
+    bool ok = sc_adb_init();
     if (!ok) {
+        return false;
+    }
+
+    ok = sc_mutex_init(&server->mutex);
+    if (!ok) {
+        sc_adb_destroy();
         return false;
     }
 
     ok = sc_cond_init(&server->cond_stopped);
     if (!ok) {
         sc_mutex_destroy(&server->mutex);
+        sc_adb_destroy();
         return false;
     }
 
@@ -512,6 +544,7 @@ sc_server_init(struct sc_server *server, const struct sc_server_params *params,
     if (!ok) {
         sc_cond_destroy(&server->cond_stopped);
         sc_mutex_destroy(&server->mutex);
+        sc_adb_destroy();
         return false;
     }
 
@@ -833,11 +866,14 @@ sc_server_switch_to_tcpip(struct sc_server *server, const char *serial) {
 }
 
 static bool
-sc_server_connect_to_tcpip(struct sc_server *server, const char *ip_port) {
+sc_server_connect_to_tcpip(struct sc_server *server, const char *ip_port,
+                           bool disconnect) {
     struct sc_intr *intr = &server->intr;
 
-    // Error expected if not connected, do not report any error
-    sc_adb_disconnect(intr, ip_port, SC_ADB_SILENT);
+    if (disconnect) {
+        // Error expected if not connected, do not report any error
+        sc_adb_disconnect(intr, ip_port, SC_ADB_SILENT);
+    }
 
     LOGI("Connecting to %s...", ip_port);
 
@@ -853,7 +889,7 @@ sc_server_connect_to_tcpip(struct sc_server *server, const char *ip_port) {
 
 static bool
 sc_server_configure_tcpip_known_address(struct sc_server *server,
-                                        const char *addr) {
+                                        const char *addr, bool disconnect) {
     // Append ":5555" if no port is present
     bool contains_port = strchr(addr, ':');
     char *ip_port = contains_port ? strdup(addr)
@@ -864,7 +900,7 @@ sc_server_configure_tcpip_known_address(struct sc_server *server,
     }
 
     server->serial = ip_port;
-    return sc_server_connect_to_tcpip(server, ip_port);
+    return sc_server_connect_to_tcpip(server, ip_port, disconnect);
 }
 
 static bool
@@ -889,7 +925,7 @@ sc_server_configure_tcpip_unknown_address(struct sc_server *server,
     }
 
     server->serial = ip_port;
-    return sc_server_connect_to_tcpip(server, ip_port);
+    return sc_server_connect_to_tcpip(server, ip_port, false);
 }
 
 static void
@@ -976,7 +1012,13 @@ run_server(void *data) {
             sc_adb_device_destroy(&device);
         }
     } else {
-        ok = sc_server_configure_tcpip_known_address(server, params->tcpip_dst);
+        // If the user passed a '+' (--tcpip=+ip), then disconnect first
+        const char *tcpip_dst = params->tcpip_dst;
+        bool plus = tcpip_dst[0] == '+';
+        if (plus) {
+            ++tcpip_dst;
+        }
+        ok = sc_server_configure_tcpip_known_address(server, tcpip_dst, plus);
         if (!ok) {
             goto error_connection_failed;
         }
@@ -1153,4 +1195,6 @@ sc_server_destroy(struct sc_server *server) {
     sc_intr_destroy(&server->intr);
     sc_cond_destroy(&server->cond_stopped);
     sc_mutex_destroy(&server->mutex);
+
+    sc_adb_destroy();
 }

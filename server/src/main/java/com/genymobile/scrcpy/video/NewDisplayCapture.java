@@ -49,10 +49,12 @@ public class NewDisplayCapture extends SurfaceCapture {
     private Size mainDisplaySize;
     private int mainDisplayDpi;
     private int maxSize;
+    private int displayImePolicy;
     private final Rect crop;
     private final boolean captureOrientationLocked;
     private final Orientation captureOrientation;
     private final float angle;
+    private final boolean vdDestroyContent;
     private final boolean vdSystemDecorations;
 
     private VirtualDisplay virtualDisplay;
@@ -67,12 +69,14 @@ public class NewDisplayCapture extends SurfaceCapture {
         this.newDisplay = options.getNewDisplay();
         assert newDisplay != null;
         this.maxSize = options.getMaxSize();
+        this.displayImePolicy = options.getDisplayImePolicy();
         this.crop = options.getCrop();
         assert options.getCaptureOrientationLock() != null;
         this.captureOrientationLocked = options.getCaptureOrientationLock() != Orientation.Lock.Unlocked;
         this.captureOrientation = options.getCaptureOrientation();
         assert captureOrientation != null;
         this.angle = options.getAngle();
+        this.vdDestroyContent = options.getVDDestroyContent();
         this.vdSystemDecorations = options.getVDSystemDecorations();
     }
 
@@ -167,8 +171,10 @@ public class NewDisplayCapture extends SurfaceCapture {
             int flags = VIRTUAL_DISPLAY_FLAG_PUBLIC
                     | VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
                     | VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH
-                    | VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT
-                    | VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL;
+                    | VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT;
+            if (vdDestroyContent) {
+                flags |= VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL;
+            }
             if (vdSystemDecorations) {
                 flags |= VIRTUAL_DISPLAY_FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS;
             }
@@ -186,6 +192,10 @@ public class NewDisplayCapture extends SurfaceCapture {
                     .createNewVirtualDisplay("scrcpy", displaySize.getWidth(), displaySize.getHeight(), dpi, surface, flags);
             virtualDisplayId = virtualDisplay.getDisplay().getDisplayId();
             Ln.i("New display: " + displaySize.getWidth() + "x" + displaySize.getHeight() + "/" + dpi + " (id=" + virtualDisplayId + ")");
+
+            if (displayImePolicy != -1) {
+                ServiceManager.getWindowManager().setDisplayImePolicy(virtualDisplayId, displayImePolicy);
+            }
 
             displaySizeMonitor.start(virtualDisplayId, this::invalidate);
         } catch (Exception e) {

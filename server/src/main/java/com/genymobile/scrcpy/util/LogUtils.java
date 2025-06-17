@@ -120,17 +120,39 @@ public final class LogUtils {
         }
     }
 
+    private static boolean isCameraBackwardCompatible(CameraCharacteristics characteristics) {
+        int[] capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+        if (capabilities == null) {
+            return false;
+        }
+
+        for (int capability : capabilities) {
+            if (capability == CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static String buildCameraListMessage(boolean includeSizes) {
         StringBuilder builder = new StringBuilder("List of cameras:");
         CameraManager cameraManager = ServiceManager.getCameraManager();
         try {
             String[] cameraIds = cameraManager.getCameraIdList();
-            if (cameraIds == null || cameraIds.length == 0) {
+            if (cameraIds.length == 0) {
                 builder.append("\n    (none)");
             } else {
                 for (String id : cameraIds) {
-                    builder.append("\n    --camera-id=").append(id);
                     CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(id);
+
+                    if (!isCameraBackwardCompatible(characteristics)) {
+                        // Ignore depth cameras as suggested by official documentation
+                        // <https://developer.android.com/media/camera/camera2/camera-enumeration>
+                        continue;
+                    }
+
+                    builder.append("\n    --camera-id=").append(id);
 
                     int facing = characteristics.get(CameraCharacteristics.LENS_FACING);
                     builder.append("    (").append(getCameraFacingName(facing)).append(", ");
@@ -141,8 +163,10 @@ public final class LogUtils {
                     try {
                         // Capture frame rates for low-FPS mode are the same for every resolution
                         Range<Integer>[] lowFpsRanges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
-                        SortedSet<Integer> uniqueLowFps = getUniqueSet(lowFpsRanges);
-                        builder.append(", fps=").append(uniqueLowFps);
+                        if (lowFpsRanges != null) {
+                            SortedSet<Integer> uniqueLowFps = getUniqueSet(lowFpsRanges);
+                            builder.append(", fps=").append(uniqueLowFps);
+                        }
                     } catch (Exception e) {
                         // Some devices may provide invalid ranges, causing an IllegalArgumentException "lower must be less than or equal to upper"
                         Ln.w("Could not get available frame rates for camera " + id, e);

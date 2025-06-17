@@ -1,5 +1,7 @@
 #include "options.h"
 
+#include <stddef.h>
+
 const struct scrcpy_options scrcpy_options_default = {
     .serial = NULL,
     .crop = NULL,
@@ -54,6 +56,7 @@ const struct scrcpy_options scrcpy_options_default = {
     .capture_orientation_lock = SC_ORIENTATION_UNLOCKED,
     .display_orientation = SC_ORIENTATION_0,
     .record_orientation = SC_ORIENTATION_0,
+    .display_ime_policy = SC_DISPLAY_IME_POLICY_UNDEFINED,
     .window_x = SC_WINDOW_POSITION_UNDEFINED,
     .window_y = SC_WINDOW_POSITION_UNDEFINED,
     .window_width = 0,
@@ -108,6 +111,7 @@ const struct scrcpy_options scrcpy_options_default = {
     .new_display = NULL,
     .start_app = NULL,
     .angle = NULL,
+    .vd_destroy_content = true,
     .vd_system_decorations = true,
 };
 

@@ -6,11 +6,11 @@
 
 Download a static build of the [latest release]:
 
- - [`scrcpy-linux-v3.0.tar.gz`][direct-linux] (x86_64)  
-   <sub>SHA-256: `06cb74e22f758228c944cea048b78e42b2925c2affe2b5aca901cfd6a649e503`</sub>
+ - [`scrcpy-linux-x86_64-v3.3.tar.gz`][direct-linux-x86_64] (x86_64)  
+   <sub>SHA-256: `a0abf37003c3c47a53c1b2a12420296a2b0ee323cf3610fd6fbf9d9bab9d99f3`</sub>
 
 [latest release]: https://github.com/Genymobile/scrcpy/releases/latest
-[direct-linux]: https://github.com/Genymobile/scrcpy/releases/download/v3.0/scrcpy-linux-v3.0.tar.gz
+[direct-linux-x86_64]: https://github.com/Genymobile/scrcpy/releases/download/v3.3/scrcpy-linux-x86_64-v3.3.tar.gz
 
 and extract it.
 
@@ -27,7 +27,7 @@ Scrcpy is packaged in several distributions and package managers:
  - Arch Linux: `pacman -S scrcpy`
  - Fedora: `dnf copr enable zeno/scrcpy && dnf install scrcpy`
  - Gentoo: `emerge scrcpy`
- - Snap: `snap install scrcpy`
+ - Snap: ~~`snap install scrcpy`~~ _(obsolete version)_
  - … (see [repology](https://repology.org/project/scrcpy/versions))
 
 

@@ -12,6 +12,7 @@ import com.genymobile.scrcpy.video.CameraAspectRatio;
 import com.genymobile.scrcpy.video.CameraFacing;
 import com.genymobile.scrcpy.video.VideoCodec;
 import com.genymobile.scrcpy.video.VideoSource;
+import com.genymobile.scrcpy.wrappers.WindowManager;
 
 import android.graphics.Rect;
 import android.util.Pair;
@@ -48,6 +49,7 @@ public class Options {
     private boolean showTouches;
     private boolean stayAwake;
     private int screenOffTimeout = -1;
+    private int displayImePolicy = -1;
     private List<CodecOption> videoCodecOptions;
     private List<CodecOption> audioCodecOptions;
 
@@ -60,6 +62,7 @@ public class Options {
     private boolean powerOn = true;
 
     private NewDisplay newDisplay;
+    private boolean vdDestroyContent = true;
     private boolean vdSystemDecorations = true;
 
     private Orientation.Lock captureOrientationLock = Orientation.Lock.Unlocked;
@@ -185,6 +188,10 @@ public class Options {
         return screenOffTimeout;
     }
 
+    public int getDisplayImePolicy() {
+        return displayImePolicy;
+    }
+
     public List<CodecOption> getVideoCodecOptions() {
         return videoCodecOptions;
     }
@@ -231,6 +238,10 @@ public class Options {
 
     public Orientation.Lock getCaptureOrientationLock() {
         return captureOrientationLock;
+    }
+
+    public boolean getVDDestroyContent() {
+        return vdDestroyContent;
     }
 
     public boolean getVDSystemDecorations() {
@@ -466,6 +477,9 @@ public class Options {
                 case "new_display":
                     options.newDisplay = parseNewDisplay(value);
                     break;
+                case "vd_destroy_content":
+                    options.vdDestroyContent = Boolean.parseBoolean(value);
+                    break;
                 case "vd_system_decorations":
                     options.vdSystemDecorations = Boolean.parseBoolean(value);
                     break;
@@ -473,6 +487,9 @@ public class Options {
                     Pair<Orientation.Lock, Orientation> pair = parseCaptureOrientation(value);
                     options.captureOrientationLock = pair.first;
                     options.captureOrientation = pair.second;
+                    break;
+                case "display_ime_policy":
+                    options.displayImePolicy = parseDisplayImePolicy(value);
                     break;
                 case "send_device_meta":
                     options.sendDeviceMeta = Boolean.parseBoolean(value);
@@ -617,5 +634,18 @@ public class Options {
         }
 
         return Pair.create(lock, Orientation.getByName(value));
+    }
+
+    private static int parseDisplayImePolicy(String value) {
+        switch (value) {
+            case "local":
+                return WindowManager.DISPLAY_IME_POLICY_LOCAL;
+            case "fallback":
+                return WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY;
+            case "hide":
+                return WindowManager.DISPLAY_IME_POLICY_HIDE;
+            default:
+                throw new IllegalArgumentException("Invalid display IME policy: " + value);
+        }
     }
 }

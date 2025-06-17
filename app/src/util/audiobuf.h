@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /**
@@ -48,6 +49,9 @@ sc_audiobuf_read(struct sc_audiobuf *buf, void *to, uint32_t samples_count);
 uint32_t
 sc_audiobuf_write(struct sc_audiobuf *buf, const void *from,
                   uint32_t samples_count);
+
+uint32_t
+sc_audiobuf_write_silence(struct sc_audiobuf *buf, uint32_t samples);
 
 static inline uint32_t
 sc_audiobuf_capacity(struct sc_audiobuf *buf) {
