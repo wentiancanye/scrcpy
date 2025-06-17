@@ -7,6 +7,7 @@
 #define SDL_MAIN_HANDLED // avoid link error on Linux Windows Subsystem
 #include <SDL2/SDL.h>
 
+#include <stdio.h>
 #include "cli.h"
 #include "options.h"
 #include "scrcpy.h"
